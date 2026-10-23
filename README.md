@@ -17,7 +17,8 @@ tap on the receipt, before a deadline. The station holds no key.**
 ![License MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![HackMeridian 2026, Scale path](https://img.shields.io/badge/HackMeridian_2026-Scale_path-070D1A?style=flat-square)
 
-<!-- VIDEO_LINK -->
+**[▶ Watch the 3-minute demo](https://youtu.be/cj7e7CjBzUM)**: a real station on a real bench, Stellar testnet, one take.
+
 <!-- DECK_LINK -->
 
 > **Testnet only.** Everything here runs on the Stellar test network with
@@ -31,6 +32,7 @@ place, a café, a coworking space, an event.
 
 | | |
 |---|---|
+| Demo video (3 min) | <https://youtu.be/cj7e7CjBzUM> |
 | Live app (PWA) | <https://ficha-stellar.vercel.app> |
 | Demo station | `YX3DGE`, "HackMeridian demo (testnet)", in the [signed registry](registry/stations.json) |
 | Escrow contract | [`CBRNN2W7…HYI6KYC`](https://stellar.expert/explorer/testnet/contract/CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC) on testnet |
