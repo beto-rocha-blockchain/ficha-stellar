@@ -1,0 +1,8 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+# 16.1.1: reads getEvents from Stellar RPC 30, which no longer sends inSuccessfulContractCall
+stellar-sdk>=16.1.1,<17
+pyserial>=3.5
+qrcode>=7.4
+python-dotenv>=1.0
+httpx>=0.27

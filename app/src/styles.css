@@ -1,0 +1,515 @@
+/* Design tokens and utilities of the Ficha app. */
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-brand-lime: var(--brand-lime);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Brand wordmark font (Montserrat). */
+  --font-brand: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --radius: 0.25rem;
+  /* Institutional deep-blue/black operational palette */
+  --background: oklch(0.135 0.022 252);
+  --foreground: oklch(0.95 0.008 240);
+  --card: oklch(0.175 0.022 250);
+  --card-foreground: oklch(0.95 0.008 240);
+  --popover: oklch(0.19 0.022 250);
+  --popover-foreground: oklch(0.95 0.008 240);
+  /* Primary = muted operational cyan */
+  --primary: oklch(0.78 0.13 215);
+  --primary-foreground: oklch(0.14 0.02 250);
+  --secondary: oklch(0.235 0.022 250);
+  --secondary-foreground: oklch(0.95 0.008 240);
+  --muted: oklch(0.215 0.02 250);
+  --muted-foreground: oklch(0.7 0.018 240);
+  /* Accent = control-room teal (operational nominal) */
+  --accent: oklch(0.78 0.1 195);
+  --accent-foreground: oklch(0.14 0.02 250);
+  --destructive: oklch(0.66 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.8 0.09 190);
+  --success-foreground: oklch(0.14 0.02 250);
+  --warning: oklch(0.82 0.16 75);
+  --warning-foreground: oklch(0.14 0.02 250);
+  /* Brand lime: the green of the Ficha mark (brand/README.md). */
+  --brand-lime: #66e619;
+  --border: oklch(0.245 0.018 252);
+  --input: oklch(0.22 0.02 250);
+  --ring: oklch(0.78 0.13 215);
+
+  /* Institutional easing & durations */
+  --ease-ops: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-med: 180ms;
+  --dur-slow: 240ms;
+  --chart-1: oklch(0.78 0.13 215);
+  --chart-2: oklch(0.78 0.1 195);
+  --chart-3: oklch(0.82 0.16 75);
+  --chart-4: oklch(0.66 0.22 25);
+  --chart-5: oklch(0.72 0.15 290);
+  --sidebar: oklch(0.155 0.022 252);
+  --sidebar-foreground: oklch(0.86 0.012 240);
+  --sidebar-primary: oklch(0.78 0.13 215);
+  --sidebar-primary-foreground: oklch(0.14 0.02 250);
+  --sidebar-accent: oklch(0.22 0.022 250);
+  --sidebar-accent-foreground: oklch(0.95 0.008 240);
+  --sidebar-border: oklch(0.245 0.02 250);
+  --sidebar-ring: oklch(0.78 0.13 215);
+
+  --gradient-primary: linear-gradient(135deg, oklch(0.78 0.13 215), oklch(0.78 0.1 195));
+  --gradient-card: linear-gradient(180deg, oklch(0.19 0.022 250), oklch(0.165 0.022 250));
+  --shadow-elegant: 0 10px 40px -10px oklch(0.08 0.02 250 / 0.7);
+  --shadow-glow: 0 0 12px oklch(0.78 0.13 215 / 0.18);
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+.light {
+  color-scheme: light;
+
+  /* ── Surfaces ────────────────────────────────────────────────────────────
+     Background: purposeful cool grey — not white.
+     Card clearly lifts off background (0.07 L gap).
+     Secondary/muted sit below card for visual hierarchy. */
+  --background: oklch(0.89 0.014 252);
+  --foreground: oklch(0.10 0.026 145);
+  --card: oklch(0.96 0.007 250);
+  --card-foreground: oklch(0.10 0.026 145);
+  --popover: oklch(0.97 0.005 250);
+  --popover-foreground: oklch(0.10 0.026 145);
+
+  /* ── Interactive — GREEN replaces blue in light mode ───────────────── */
+  --primary: oklch(0.38 0.20 145);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.83 0.016 252);
+  --secondary-foreground: oklch(0.12 0.026 145);
+  --muted: oklch(0.84 0.014 252);
+  --muted-foreground: oklch(0.30 0.026 145);
+  --accent: oklch(0.38 0.20 145);
+  --accent-foreground: oklch(0.98 0 0);
+
+  /* ── Status ─────────────────────────────────────────────────────────── */
+  --destructive: oklch(0.44 0.22 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.38 0.20 145);
+  --success-foreground: oklch(0.98 0 0);
+  --warning: oklch(0.50 0.19 75);
+  --warning-foreground: oklch(0.10 0.02 145);
+  --brand-lime: #00b130;
+
+  /* ── Structure ──────────────────────────────────────────────────────── */
+  --border: oklch(0.73 0.020 252);
+  --input: oklch(0.90 0.011 250);
+  --ring: oklch(0.38 0.20 145);
+
+  /* ── Charts — green palette ──────────────────────────────────────────── */
+  --chart-1: oklch(0.38 0.20 145);
+  --chart-2: oklch(0.44 0.18 158);
+  --chart-3: oklch(0.50 0.19 75);
+  --chart-4: oklch(0.44 0.22 25);
+  --chart-5: oklch(0.44 0.17 290);
+
+  /* ── Sidebar — slightly darker than main bg ──────────────────────────── */
+  --sidebar: oklch(0.85 0.017 252);
+  --sidebar-foreground: oklch(0.11 0.026 145);
+  --sidebar-primary: oklch(0.38 0.20 145);
+  --sidebar-primary-foreground: oklch(0.98 0 0);
+  --sidebar-accent: oklch(0.81 0.019 252);
+  --sidebar-accent-foreground: oklch(0.11 0.026 145);
+  --sidebar-border: oklch(0.71 0.020 252);
+  --sidebar-ring: oklch(0.38 0.20 145);
+
+  /* ── Gradients & shadows ─────────────────────────────────────────────── */
+  --gradient-primary: linear-gradient(135deg, oklch(0.38 0.20 145), oklch(0.44 0.18 158));
+  --gradient-card: linear-gradient(180deg, oklch(0.97 0.005 250), oklch(0.93 0.010 252));
+  --shadow-elegant: 0 10px 40px -10px oklch(0.28 0.025 145 / 0.26);
+  --shadow-glow: 0 0 12px oklch(0.38 0.20 145 / 0.22);
+
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-display);
+    font-feature-settings: "ss01", "cv11", "tnum";
+  }
+  .font-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum";
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Institutional operational labels */
+  .label-op {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  .kpi-num {
+    font-family: var(--font-display);
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .panel {
+    background-color: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--card) 85%, transparent);
+  }
+  .table-inst th {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    text-align: left;
+    padding: 0.45rem 0.65rem;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--background) 50%, var(--card));
+    position: sticky;
+    top: 0;
+  }
+  .table-inst td {
+    font-size: 11.5px;
+    padding: 0.5rem 0.65rem;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+    font-variant-numeric: tabular-nums;
+  }
+  .table-inst tr:hover td {
+    background: color-mix(in oklab, var(--primary) 4%, transparent);
+  }
+  .grid-bg {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--border) 55%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--border) 55%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 28px 28px;
+  }
+
+  @keyframes scada-scan {
+    0% {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    50% {
+      opacity: 0.55;
+    }
+    100% {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+  }
+  @keyframes pulse-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 45%, transparent);
+    }
+    50% {
+      box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 0%, transparent);
+    }
+  }
+  @keyframes flow-dash {
+    to {
+      stroke-dashoffset: -32;
+    }
+  }
+  @keyframes node-pulse {
+    0%,
+    100% {
+      r: 5;
+      opacity: 1;
+    }
+    50% {
+      r: 7.5;
+      opacity: 0.65;
+    }
+  }
+  @keyframes ticker-up {
+    from {
+      transform: translateY(8px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes blink {
+    0%,
+    60% {
+      opacity: 1;
+    }
+    61%,
+    100% {
+      opacity: 0.25;
+    }
+  }
+  .animate-scada-scan {
+    animation: scada-scan 3.6s ease-in-out infinite;
+  }
+  .animate-pulse-glow {
+    animation: pulse-glow 2.4s ease-out infinite;
+  }
+  .animate-flow-dash {
+    animation: flow-dash 1.4s linear infinite;
+  }
+  .animate-node-pulse {
+    animation: node-pulse 2.2s ease-in-out infinite;
+  }
+  .animate-ticker-up {
+    animation: ticker-up 0.4s ease-out;
+  }
+  .animate-blink {
+    animation: blink 1.6s steps(1) infinite;
+  }
+
+  /* ── Smooth page transition — content eases in on every route change ──── */
+  @keyframes ep-page-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .ep-page-in {
+    animation: ep-page-in 320ms var(--ease-ops) both;
+  }
+  /* Opacity-only entrance for full-height / root wrappers: a translateY on a
+     100vh element pushes its bottom past the viewport (transforms count toward
+     scrollable overflow) and flashes a document scrollbar during the splash. */
+  @keyframes ep-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .ep-page-in-fade {
+    animation: ep-fade-in 320ms var(--ease-ops) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ep-page-in-fade { animation: none; }
+  }
+
+  /* Live "current" pulse — a lit segment with a glowing leading dot travels
+     LEFT→RIGHT along the wave line (electric current flowing). Period (240) is
+     larger than the path (100) so there's a clear gap between pulses; the pulse
+     and its head share one animation so the dot rides at the pulse's front. */
+  @keyframes ep-current {
+    to { stroke-dashoffset: 0; }
+  }
+  .ep-current-base {
+    opacity: 0.3;
+  }
+  .ep-current-pulse {
+    stroke-dasharray: 16 344;
+    stroke-dashoffset: 360;
+    animation: ep-current 3.3s linear infinite;
+    filter: drop-shadow(0 0 2px currentColor);
+  }
+  /* Glowing leading dot — bigger, brighter head riding the pulse's front edge. */
+  .ep-current-dot {
+    stroke-dasharray: 0 14 3 343;
+    stroke-dashoffset: 360;
+    animation: ep-current 3.3s linear infinite;
+    stroke-width: 4.5;
+    filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor);
+  }
+  /* Status dot — phase-locked to the traveling current. Same 3.3s period, and it
+     mounts alongside the wave so both animations start together and stay in sync:
+     a bright sweep while the current crosses the graph (~0–28% of the cycle), then
+     a calm baseline through the gap. Glow uses the dot's own currentColor. */
+  @keyframes ep-status-pulse {
+    /* Calm while the current sweeps the graph (~0–28%) and through the gap. */
+    0%, 80% { opacity: 0.5; transform: scale(0.82); box-shadow: 0 0 0 0 transparent; }
+    /* Flash at the END of the cycle so the dot lights up JUST BEFORE the current
+       re-enters the graph at 0%/100% — reads as "the pulse passes the dot, then
+       travels into the graph". */
+    88%     { opacity: 0.9; transform: scale(1.18); box-shadow: 0 0 5px 1px currentColor; }
+    94%     { opacity: 1;   transform: scale(1.4);  box-shadow: 0 0 8px 2px currentColor; }
+    100%    { opacity: 0.5; transform: scale(0.82); box-shadow: 0 0 0 0 transparent; }
+  }
+  .ep-status-dot {
+    animation: ep-status-pulse 3.3s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ep-current-pulse, .ep-current-dot { animation: none; stroke-dasharray: none; opacity: 0; }
+    .ep-current-base { opacity: 1; }
+    .ep-status-dot { animation: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ep-page-in {
+      animation: none;
+    }
+  }
+  .terminal-grid-bg {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--border) 60%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--border) 60%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 24px 24px;
+  }
+
+  /* ── Splash screen ──────────────────────────────────────────────────── */
+
+  /* ── Market ticker ─────────────────────────────────────────────────── */
+
+  @keyframes ep-ticker {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  .animate-ep-ticker {
+    animation: ep-ticker 55s linear infinite;
+    will-change: transform;
+  }
+  .animate-ep-ticker:hover {
+    animation-play-state: paused;
+  }
+
+  /* ── Splash screen ──────────────────────────────────────────────────── */
+
+  @keyframes ep-logo-pulse {
+    0%,
+    100% {
+      filter:
+        drop-shadow(0 0 14px rgba(0, 200, 238, 0.60))
+        drop-shadow(0 0 48px rgba(102, 230, 25, 0.28))
+        drop-shadow(0 0 90px rgba(0, 200, 238, 0.12));
+    }
+    50% {
+      filter:
+        drop-shadow(0 0 32px rgba(0, 200, 238, 0.95))
+        drop-shadow(0 0 100px rgba(102, 230, 25, 0.55))
+        drop-shadow(0 0 160px rgba(0, 200, 238, 0.25));
+    }
+  }
+
+  /* Applied to the splash logo image / badge */
+  .ep-splash-logo {
+    animation: ep-logo-pulse 2.4s ease-in-out infinite;
+    /* Pin the badge to its own GPU compositor layer. The heavy drop-shadow pulse
+       was being re-rasterized into the parent layer every frame, and the sub-pixel
+       grid realignment made the logo wobble/drift sideways. Promoting it to a stable
+       layer applies the filter over the already-rasterized badge → no jitter. */
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    will-change: filter;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ep-splash-logo {
+      animation: none;
+      filter: drop-shadow(0 0 14px rgba(0, 200, 238, 0.60));
+    }
+  }
+}
+
+
+/* ── Ficha additions ─────────────────────────────────────────────────── */
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+}
+@layer utilities {
+  /* Safe-area padding for the fixed bottom nav on phones (notch / gesture bar). */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  /* Brand mark colour: the placeholder SVGs paint with currentColor. */
+  .brand-mark {
+    color: var(--primary);
+  }
+}

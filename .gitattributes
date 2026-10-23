@@ -1,0 +1,5 @@
+# The registry is signed byte for byte: git must never convert its line endings.
+registry/** -text
+# gradlew runs under sh on Linux, macOS and WSL: keep it LF even where
+# core.autocrlf=true would check it out with CRLF.
+app/android/gradlew text eol=lf

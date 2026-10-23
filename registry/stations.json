@@ -1,0 +1,57 @@
+{
+  "format": "ficha-registry/1",
+  "issued_at": "2026-10-02T05:15:00Z",
+  "network": "testnet",
+  "stations": [
+    {
+      "id": "ERZGCG",
+      "name": "Demo bench (testnet)",
+      "host_key": "GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6",
+      "asset": {
+        "code": "XLM",
+        "issuer": null
+      },
+      "ficha_price": "1",
+      "ficha_minutes": 5,
+      "max_session_minutes": 60,
+      "mode": "custody",
+      "escrow": "CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC",
+      "unit_seconds": 30,
+      "grace_seconds": 1680,
+      "location": {
+        "lat": -22.9068,
+        "lng": -43.1729,
+        "address": "Demo station, testnet only",
+        "city": "Rio de Janeiro",
+        "country": "BR"
+      },
+      "hours": "Mon-Fri 08:00-20:00",
+      "active": true
+    },
+    {
+      "id": "YX3DGE",
+      "name": "HackMeridian demo (testnet)",
+      "host_key": "GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6",
+      "asset": {
+        "code": "XLM",
+        "issuer": null
+      },
+      "ficha_price": "1",
+      "ficha_minutes": 1,
+      "max_session_minutes": 10,
+      "mode": "custody",
+      "escrow": "CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC",
+      "unit_seconds": 15,
+      "grace_seconds": 1680,
+      "location": {
+        "lat": 38.7352,
+        "lng": -9.1043,
+        "address": "Demo table near ONE16, Marvila (testnet only)",
+        "city": "Lisboa",
+        "country": "PT"
+      },
+      "hours": "25-26 Oct 2026",
+      "active": true
+    }
+  ]
+}

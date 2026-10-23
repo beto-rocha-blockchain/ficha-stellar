@@ -1,0 +1,5 @@
+{
+  "format": "ficha-registry-sig/1",
+  "key": "GBC2MDBTM4MX3XJKRX5QM3YXUR2AISCOJGJ74MXLPIZHZDIDHOLFAASA",
+  "sig": "3Z4KdmaSSzrF/3QZDXSRL5+nCFRaryJe4UCv5Iz31cbcbQP9liXYGLEDMS6jurhUBO+csZMnmMI6E6ru2oRgDA=="
+}

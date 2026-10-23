@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ficha</title>
+<!-- Nothing from another host: the fonts and the logo come from this station
+     (/static). This page must open offline. -->
+<link rel="icon" type="image/svg+xml" href="/static/brand/ficha-favicon.svg">
+<!-- The faces on screen from the first frame: no flash of a system font. -->
+<link rel="preload" href="/static/fonts/space-grotesk-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/space-grotesk-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/space-grotesk-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/jetbrains-mono-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  /* The Ficha app's look (app/src/styles.css, dark theme): its palette as
+     sRGB, Space Grotesk for text and numbers, JetBrains Mono for the small
+     uppercase labels. The fonts come from this station, never from a CDN. */
+  @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 400; font-display: swap; src: url("/static/fonts/space-grotesk-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 500; font-display: swap; src: url("/static/fonts/space-grotesk-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 600; font-display: swap; src: url("/static/fonts/space-grotesk-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Space Grotesk"; font-style: normal; font-weight: 700; font-display: swap; src: url("/static/fonts/space-grotesk-latin-700-normal.woff2") format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("/static/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("/static/fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Montserrat"; font-style: normal; font-weight: 700; font-display: swap; src: url("/static/fonts/montserrat-latin-700-normal.woff2") format("woff2"); }
+  :root {
+    color-scheme: dark;
+    --background: #030911;
+    --foreground: #eaeff3;
+    --card: #09111a;
+    --bar: #060d15;
+    --border: #1a2129;
+    --muted-foreground: #95a0a9;
+    --primary: #2ccceb;
+    --success: #73d1ca;
+    --warning: #ffb330;
+    --destructive: #fc4447;
+    --brand-lime: #66e619;
+    --brand-cyan: #00c8ee;
+    --near-white: #f2f2f2;
+    /* rgb triplets for the app's tints: rgb(var(--primary-rgb) / .1) */
+    --background-rgb: 3 9 17;
+    --muted-foreground-rgb: 149 160 169;
+    --primary-rgb: 44 204 235;
+    --success-rgb: 115 209 202;
+    --warning-rgb: 255 179 48;
+    --destructive-rgb: 252 68 71;
+    --lime-rgb: 102 230 25;
+    --font-display: "Space Grotesk", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --font-brand: "Montserrat", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    --radius-md: 2px;
+    --radius: 4px;
+    --radius-xl: 8px;
+    /* Type follows the width, but never beyond what a 16:9 screen of this height
+       allows: a maximized browser window, shorter than the screen, still
+       shows every number and the price. */
+    --u: min(1vw, 1.7778vh);
+    /* The side margin of every band (header, readings, notice, footer) and
+       the gutter between the readings and the pay column. */
+    --pad-x: max(28px, 3.6 * var(--u));
+    --gutter: max(24px, 3.2 * var(--u));
+    /* The logo lockup is never under 48 px (brand/README.md) and keeps
+       x/2 clear around it, x = 5/9 of its height. */
+    --logo-h: max(48px, 3.2 * var(--u));
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--background); color: var(--foreground); font-family: var(--font-display);
+               font-feature-settings: "ss01", "cv11", "tnum"; overflow: hidden; }
+  body { display: grid; grid-template-rows: auto 1fr auto auto; height: 100vh; }
+  .num { font-family: var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .label { font-family: var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.18em;
+           font-size: clamp(0.85rem, 1.3 * var(--u), 1.5rem); font-weight: 500; line-height: 1.2; }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+
+  /* header: one line, always. A second line would push the readings and
+     the price off the screen: nothing wraps, and a station name too long
+     for what is left ends in "…" (its ID stays). Sizes keep the longest
+     line (WAITING FOR PAYMENT, or CHARGING and DELIVERING) inside the
+     margins down to a 1280 px window. The gap is never under the lockup's
+     clear space (x/2 = 5/18 of its height). */
+  header { display: flex; align-items: center; gap: max(14px, 1.1 * var(--u)); padding: calc(var(--logo-h) * 5 / 18) var(--pad-x); border-bottom: 1px solid var(--border); min-width: 0; }
+  header > * { flex-shrink: 0; white-space: nowrap; }
+  .brand { display: flex; align-items: center; height: var(--logo-h); }
+  .brand img { display: block; height: var(--logo-h); width: auto; }
+  /* The lockup could not load (a server that does not serve /static): the
+     name in type, sized and spaced like the lockup, never a broken image
+     with its alt text. Montserrat Bold, tracking 0.05 em, the C in the brand
+     gradient (brand/README.md), on a system font if Montserrat is missing too. */
+  .wordmark { display: none; font-family: var(--font-brand); font-weight: 700; font-size: calc(var(--logo-h) * 0.78); line-height: 1;
+              letter-spacing: 0.05em; color: var(--near-white); }
+  .wordmark b { font-weight: inherit; color: var(--brand-lime); background: linear-gradient(180deg, var(--brand-lime), var(--brand-cyan));
+                -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .brand.noimg img { display: none; }
+  .brand.noimg .wordmark { display: block; }
+  /* State pill, the app's status badge: tinted, with a dot. */
+  .state { display: inline-flex; align-items: center; gap: 0.6em; font-family: var(--font-mono); font-weight: 500; text-transform: uppercase;
+           letter-spacing: 0.08em; font-size: clamp(0.8rem, 1.05 * var(--u), 1.3rem); line-height: 1; padding: 0.55em 0.75em;
+           border-radius: var(--radius-md); border: 1px solid rgb(var(--primary-rgb) / .4); background: rgb(var(--primary-rgb) / .1); color: var(--primary); }
+  .state::before { content: ""; width: 0.5em; height: 0.5em; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  body.s-CHARGING .state { border-color: rgb(var(--lime-rgb) / .4); background: rgb(var(--lime-rgb) / .1); color: var(--brand-lime); }
+  body.s-CHARGING .state::before { animation: pulse 2s ease-in-out infinite; }
+  body.s-COURTESY .state { border-color: rgb(var(--warning-rgb) / .4); background: rgb(var(--warning-rgb) / .1); color: var(--warning); }
+  body.s-FINISHED .state { border-color: rgb(var(--success-rgb) / .4); background: rgb(var(--success-rgb) / .1); color: var(--success); }
+  .badge-delivering { display: none; align-items: center; gap: 0.45em; font-family: var(--font-mono); font-weight: 500; text-transform: uppercase;
+                      letter-spacing: 0.08em; font-size: clamp(0.8rem, 1.05 * var(--u), 1.3rem); line-height: 1; padding: 0.55em 0.75em;
+                      border: 1px solid var(--brand-lime); border-radius: var(--radius-md); background: var(--brand-lime); color: var(--background); }
+  .badge-delivering svg { width: 1em; height: 1em; fill: currentColor; }
+  body.delivering .badge-delivering { display: inline-flex; animation: pulse 1.6s ease-in-out infinite; }
+  .spacer { flex: 1; }
+  .station { color: var(--muted-foreground); font-size: clamp(1rem, 1.35 * var(--u), 1.7rem); font-weight: 500;
+             display: flex; min-width: 0; overflow: hidden; flex-shrink: 1; }
+  #stname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #stid { flex-shrink: 0; }
+  .sid { display: flex; align-items: baseline; gap: 0.6em; color: var(--muted-foreground); font-size: clamp(0.85rem, 1.05 * var(--u), 1.3rem); }
+  .sid .k, .h .k { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.72em; }
+  .sid b, #host { font-family: var(--font-mono); font-weight: 500; color: var(--foreground); letter-spacing: 0; }
+  .keys { display: flex; align-items: center; gap: 0.9em; color: var(--muted-foreground); font-size: clamp(0.8rem, 0.95 * var(--u), 1.15rem); }
+  .keys .key { display: inline-flex; align-items: center; gap: 0.45em; }
+  .keys kbd { font-family: var(--font-mono); font-weight: 500; line-height: 1; border: 1px solid var(--border); border-radius: var(--radius-md);
+              background: var(--card); padding: 0.3em 0.5em; color: var(--foreground); }
+  /* Only the keys that do something now, so the line keeps its room: C
+     starts a courtesy while waiting for a payment; E ends a session (or a
+     courtesy). ESC always cuts the power. */
+  .keys .k-e { display: none; }
+  body.s-CHARGING .keys .k-e, body.s-COURTESY .keys .k-e { display: inline-flex; }
+  /* MOCK only: U unplugs the simulated phone (or plugs it back in). */
+  .keys .k-u { display: none; }
+  body.mock.s-CHARGING .keys .k-u { display: inline-flex; }
+  body:not(.s-AWAITING_PAYMENT) .keys .k-c { display: none; }
+
+  /* main: the readings take all the width the pay column leaves, and the
+     pay column is as wide as its QR card. */
+  main { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--gutter);
+         padding: calc(1.2 * var(--u)) var(--pad-x); min-height: 0; overflow: hidden; }
+  /* The readings: the current over the time left, and the fichas, power and
+     energy tiles in a column beside them, so no band of the screen is left
+     empty. Waiting for the phone, checking, paused or finished: one column. */
+  .readings { display: grid; grid-template-columns: minmax(0, 1fr) calc(18 * var(--u)); column-gap: var(--gutter);
+              grid-template-areas: "phase phase" "cur tiles" "tl tiles" "sum sum"; align-content: center; min-width: 0; }
+  .readings > .phase { grid-area: phase; margin-bottom: calc(1.8 * var(--u)); }
+  .readings > .cur { grid-area: cur; min-width: 0; }
+  .readings > .tl { grid-area: tl; min-width: 0; margin-top: calc(2 * var(--u)); }
+  .readings > .row { grid-area: tiles; }
+  .readings > .summary { grid-area: sum; }
+  body.ph-waiting .readings, body.ph-checking .readings, body.ph-paused .readings, body.s-FINISHED .readings {
+    grid-template-columns: minmax(0, 1fr); grid-template-areas: "phase" "cur" "tl" "sum"; }
+  .readings .label { margin-bottom: calc(0.3 * var(--u)); }
+
+  /* The current is the protagonist, the time left comes second: as tall as
+     the screen allows, and set smaller (see fit()) only when a long reading
+     would not fit its column. The hint shares the label's line: the numbers
+     get the height. */
+  .current { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: calc(1.4 * var(--u)); align-items: baseline; }
+  .current .label { grid-area: 1 / 1; }
+  .current .hint { grid-area: 1 / 2; color: var(--muted-foreground); font-size: clamp(1rem, 1.5 * var(--u), 1.8rem); line-height: 1.2;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .current .value { grid-area: 2 / 1 / 3 / 3; font-size: clamp(4rem, 19.5 * var(--u), 26rem); font-weight: 600; line-height: 0.84; white-space: nowrap; }
+  .current .unit { font-family: var(--font-mono); font-size: 0.2em; color: var(--muted-foreground); font-weight: 500; margin-left: 0.25em; letter-spacing: 0; }
+  body.delivering .current .value { color: var(--brand-lime); }
+
+  .time .value { font-size: clamp(3rem, 12 * var(--u), 16rem); font-weight: 600; line-height: 0.88; white-space: nowrap; }
+  body.s-COURTESY .time .value { color: var(--warning); }
+
+  /* Charging, but the countdown stands still: waiting for the phone to charge
+     from this station, checking that it does (a probe), or paused. What to do
+     comes first; the current, maybe from another charger, steps back. */
+  .phase { display: none; border: 1px solid rgb(var(--warning-rgb) / .45); border-radius: var(--radius-xl); padding: calc(1.6 * var(--u)) calc(2 * var(--u));
+           background: rgb(var(--warning-rgb) / .08); }
+  body.ph-waiting .phase, body.ph-checking .phase, body.ph-paused .phase { display: block; }
+  .phase .title { font-size: clamp(1.6rem, 3.4 * var(--u), 4.2rem); font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; color: var(--warning); }
+  .phase .sub { color: var(--muted-foreground); font-size: clamp(1rem, 1.6 * var(--u), 1.9rem); margin-top: calc(0.8 * var(--u)); line-height: 1.3; }
+  body.ph-checking .phase { border-color: var(--border); background: var(--card); }
+  body.ph-checking .phase .title { color: var(--foreground); animation: pulse 1.2s ease-in-out infinite; }
+  body.ph-elsewhere .phase { border-color: rgb(var(--destructive-rgb) / .45); background: rgb(var(--destructive-rgb) / .08); }
+  body.ph-elsewhere .phase .title { color: var(--destructive); }
+  body.ph-waiting .current .value, body.ph-checking .current .value, body.ph-paused .current .value { font-size: clamp(2.6rem, 8.5 * var(--u), 11rem); color: var(--muted-foreground); }
+  body.ph-waiting .time .value, body.ph-checking .time .value, body.ph-paused .time .value { font-size: clamp(2.6rem, 7 * var(--u), 9rem); color: var(--muted-foreground); }
+  body.ph-waiting .readings > .tl, body.ph-checking .readings > .tl, body.ph-paused .readings > .tl { margin-top: calc(1.4 * var(--u)); }
+  /* Power and energy of a phone not (yet) charging from here are not this
+     station's; the banner needs the room. */
+  body.ph-waiting .row.live, body.ph-checking .row.live, body.ph-paused .row.live { display: none; }
+  body.ph-waiting .state, body.ph-paused .state { border-color: rgb(var(--warning-rgb) / .4); background: rgb(var(--warning-rgb) / .1); color: var(--warning); }
+  body.ph-checking .state { border-color: var(--border); background: var(--card); color: var(--foreground); }
+  body.ph-elsewhere .state { border-color: rgb(var(--destructive-rgb) / .4); background: rgb(var(--destructive-rgb) / .1); color: var(--destructive); }
+
+  /* fichas, power and energy: the app's KPI tiles, stacked beside the numbers
+     and as tall as they are together. */
+  .row { display: flex; flex-direction: column; gap: calc(1.2 * var(--u)); min-width: 0; }
+  .stat { flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; background: var(--card); border: 1px solid var(--border);
+          border-radius: var(--radius-xl); padding: calc(1.2 * var(--u)) calc(1.6 * var(--u)); }
+  .stat .label { font-size: clamp(0.8rem, 1 * var(--u), 1.2rem); letter-spacing: 0.12em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat .value { font-size: clamp(1.8rem, 3.4 * var(--u), 4.6rem); font-weight: 600; line-height: 1; margin-top: calc(0.6 * var(--u)); white-space: nowrap; }
+  .stat .value small { font-family: var(--font-mono); font-size: 0.4em; color: var(--muted-foreground); font-weight: 500; letter-spacing: 0; }
+  .label em { font-style: normal; color: var(--warning); }
+  .fichas .value { color: var(--primary); }
+
+  /* The pay column: what to do, the QR card(s), the price. */
+  .side { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(1.2 * var(--u)); min-width: 0; }
+  .qrs { display: flex; gap: calc(1.2 * var(--u)); justify-content: center; align-items: stretch; }
+  /* QR cards: the app's card, the QR itself black on white for any camera. */
+  .qrcard { margin: 0; display: flex; flex-direction: column; align-items: center; gap: calc(0.8 * var(--u)); min-width: 0;
+            background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); padding: calc(1.2 * var(--u)); }
+  .qrcard figcaption { display: none; align-items: center; gap: 0.5em; font-size: clamp(1.3rem, 2.4 * var(--u), 2.8rem); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+  .step { display: inline-flex; align-items: center; justify-content: center; width: 1.5em; height: 1.5em; border-radius: 50%; font-family: var(--font-mono);
+          font-weight: 500; font-size: 0.75em; border: 1px solid rgb(var(--primary-rgb) / .6); background: rgb(var(--primary-rgb) / .1); color: var(--primary); }
+  /* Notes wrap to the card's width instead of widening it (width 0, min-width 100%). */
+  .qrnote { color: var(--muted-foreground); text-align: center; font-size: clamp(0.9rem, 1.4 * var(--u), 1.7rem); line-height: 1.3;
+            width: 0; min-width: 100%; overflow-wrap: anywhere; }
+  .qrnote b { color: var(--foreground); font-weight: 600; }
+  .qrcard.wifi { display: none; }
+  /* A network is offered: "1. Get online" and "2. Pay", side by side. */
+  body.two-qr .qrcard.wifi { display: flex; }
+  body.two-qr .qrcard figcaption { display: inline-flex; }
+  .qrbox { background: #fff; border-radius: var(--radius); padding: calc(1 * var(--u)); line-height: 0; }
+  .qrbox img { display: block; width: min(22vw, 34vh); height: auto; image-rendering: pixelated; }
+  /* Waiting for a payment: the pay QR as big as the column allows. */
+  body.big-qr .qrbox img { width: min(30vw, 36vh); }
+  body.two-qr .qrbox img { width: min(16vw, 24vh); }
+  /* Charging: only the pay QR, smaller than in any waiting layout. */
+  body.s-CHARGING .qrbox img { width: min(16vw, 26vh); }
+  body.s-COURTESY .qrs .qrcard { border-color: var(--warning); box-shadow: 0 0 0 calc(0.5 * var(--u)) rgb(var(--warning-rgb) / .3); }
+  /* The finished session's memo is closed: never show a QR that pays into it. */
+  body.s-FINISHED .qrs, body.s-FINISHED .price, body.s-FINISHED .pricenote { display: none; }
+  /* Relay not answering or log not writable: do not take money that cannot buy energy. */
+  body.oos .qrs, body.oos .price, body.oos .pricenote { display: none; }
+  /* ... and says so in the app's error box: tinted red, 1px border. */
+  body.oos .cta { color: var(--destructive); border: 1px solid rgb(var(--destructive-rgb) / .4); background: rgb(var(--destructive-rgb) / .08);
+                  border-radius: var(--radius-xl); padding: 0.45em 1em; }
+  /* At the session limit no whole ficha fits: a payment would buy no energy. */
+  body.full .qrs, body.full .pricenote { display: none; }
+  .cta { font-size: clamp(1.6rem, 3 * var(--u), 3.8rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; text-align: center; white-space: nowrap; }
+  body.big-qr .cta { font-size: clamp(1.8rem, 3.3 * var(--u), 4.2rem); }
+  .price { font-size: clamp(1.1rem, 2 * var(--u), 2.6rem); color: var(--muted-foreground); text-align: center; white-space: nowrap; }
+  .price b { color: var(--foreground); font-weight: 600; }
+  .pricenote { font-size: clamp(0.8rem, 1.1 * var(--u), 1.4rem); color: var(--muted-foreground); text-align: center; line-height: 1.35;
+               width: 0; min-width: 100%; }
+  /* Landscape with a network offered: two QRs side by side make the column
+     as tall as the screen, so its type shrinks to keep the price on screen. */
+  @media (min-aspect-ratio: 1/1) {
+    body.two-qr .cta { font-size: clamp(1.5rem, 2.5 * var(--u), 3.2rem); }
+    body.two-qr .qrcard figcaption { font-size: clamp(1.1rem, 1.8 * var(--u), 2.2rem); }
+    body.two-qr .qrnote { font-size: clamp(0.8rem, 1.1 * var(--u), 1.35rem); }
+  }
+  /* Receipt of the session that just ended: FINISHED screen, paid sessions. */
+  .receipt { display: none; }
+  body.has-receipt .receipt { display: flex; }
+  .receipt .qrbox img { width: min(22vw, 34vh); }
+  /* Custody: the last session's receipt (its refund) stays on the waiting
+     screen until it is claimed or its deadline passes, smaller, where the
+     fichas, power and energy tiles are while charging (all zero meanwhile),
+     away from the pay QR and labelled as the previous customer's: someone
+     who came to pay must not scan it by mistake. */
+  .readings > .lastreceipt { grid-area: tiles; justify-content: center; }
+  .lastreceipt { display: none; border-style: dashed; border-color: rgb(var(--success-rgb) / .45); }
+  body.has-last .lastreceipt { display: flex; }
+  body.has-last .row.live { display: none; }
+  #lastqr { width: min(13vw, 24vh); }
+  .lastreceipt .qrnote { font-size: clamp(0.8rem, 1.1 * var(--u), 1.35rem); }
+  .lastreceipt .qrnote b { display: block; color: var(--success); font-size: 1.15em; margin-bottom: 0.2em; }
+
+  /* finished summary */
+  .summary { display: none; font-size: clamp(1.1rem, 2 * var(--u), 2.6rem); line-height: 1.5; background: var(--card);
+             border: 1px solid var(--border); border-radius: var(--radius-xl); padding: calc(2.2 * var(--u)) calc(2.6 * var(--u)); }
+  body.s-FINISHED .summary { display: block; }
+  body.s-FINISHED .live { display: none; }
+  /* "Done. Thank you." stays on one line inside the card. */
+  .summary .big { font-size: clamp(2.6rem, 6 * var(--u), 8rem);
+                  font-weight: 700; line-height: 1; letter-spacing: -0.025em; margin-bottom: calc(1.8 * var(--u)); white-space: nowrap; }
+  .summary b { font-weight: 600; }
+  .summary em { font-style: normal; font-family: var(--font-mono); font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.12em; color: var(--warning); }
+  #sumcut { color: var(--muted-foreground); }
+  /* Custody: the contract and the session's transactions, for anyone who
+     wants to look them up on the ledger. */
+  .summary .chain { display: none; font-family: var(--font-mono); font-size: 0.62em; color: var(--muted-foreground);
+                    letter-spacing: 0.02em; margin-top: calc(0.6 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.custody .summary .chain { display: block; }
+  .verdict { font-weight: 700; }
+  .verdict.delivered { color: var(--brand-lime); }
+  .verdict.no_current, .verdict.unverified { color: var(--warning); }
+
+  /* notice: one line, always. A second line would push the readings and the
+     price off the screen: a notice too wide is set smaller (see notice()). */
+  .notice { text-align: center; font-size: clamp(1.1rem, 2 * var(--u), 2.4rem); font-weight: 600; line-height: 1.4; padding: calc(0.35 * var(--u)) calc(2 * var(--u)); margin: 0 var(--pad-x) calc(1 * var(--u)); min-height: 1.5em; color: var(--warning);
+            border: 1px solid rgb(var(--warning-rgb) / .4); border-radius: var(--radius); background: rgb(var(--warning-rgb) / .08);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .notice:empty { border-color: transparent; background: none; }
+
+  /* footer: one line, always, for the same reason. Each health item gets the
+     width it needs while there is room; a long error (a relay port message,
+     say) takes what is left and ends in "…". */
+  footer { display: grid; grid-template-columns: repeat(6, minmax(0, max-content)) max-content max-content; justify-content: start;
+           align-items: center; gap: max(12px, 1.5 * var(--u)); padding: calc(1 * var(--u)) var(--pad-x); border-top: 1px solid var(--border); background: var(--bar);
+           font-family: var(--font-mono); font-size: clamp(0.75rem, 1 * var(--u), 1.25rem); color: var(--muted-foreground); white-space: nowrap; }
+  .h { display: inline-flex; align-items: center; gap: 0.5em; min-width: 0; }
+  .h > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .h .k { font-size: 0.85em; letter-spacing: 0.08em; color: rgb(var(--muted-foreground-rgb) / .8); }
+  /* The escrow contract's events: custody mode only. */
+  .h.escrow { display: none; }
+  body.custody .h.escrow { display: inline-flex; }
+  /* Health dots, the app's status dots. */
+  .dot { width: 0.6em; height: 0.6em; border-radius: 50%; background: rgb(var(--muted-foreground-rgb) / .5); flex-shrink: 0; }
+  .dot.ok { background: var(--success); }
+  .dot.warn { background: var(--warning); }
+  .dot.bad { background: var(--destructive); }
+  .dot.ok, .dot.warn, .dot.bad { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  /* Network badge as in the app: TESTNET in the brand lime, MAINNET in cyan. */
+  .net { display: inline-flex; align-items: center; gap: 0.55em; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; padding: 0.3em 0.7em;
+         font-size: 1.05em; border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--foreground); }
+  .net::before { content: ""; width: 0.45em; height: 0.45em; border-radius: 50%; background: currentColor; animation: pulse 3.3s ease-in-out infinite; }
+  .net.testnet { color: var(--brand-lime); border-color: rgb(var(--lime-rgb) / .4); background: rgb(var(--lime-rgb) / .1); }
+  .net.public { color: var(--primary); border-color: rgb(var(--primary-rgb) / .4); background: rgb(var(--primary-rgb) / .1); }
+
+  /* link lost: the app's full-screen gate */
+  .lost { display: none; position: fixed; inset: 0; background: rgb(var(--background-rgb) / .95); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+          align-items: center; justify-content: center; flex-direction: column; gap: calc(2 * var(--u)); font-size: clamp(1.6rem, 3 * var(--u), 3.4rem); font-weight: 700;
+          letter-spacing: -0.02em; color: var(--destructive); text-align: center; }
+  body.offline .lost { display: flex; }
+  .lost img { width: max(48px, 6 * var(--u)); height: auto; margin-bottom: calc(1 * var(--u)); }
+  .lost small { color: var(--muted-foreground); font-family: var(--font-mono); font-size: 0.42em; font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .state::before, .badge-delivering, .dot, .net::before, body.ph-checking .phase .title { animation: none !important; }
+  }
+  @media (max-aspect-ratio: 1/1) {
+    main { grid-template-columns: minmax(0, 1fr); align-content: center; }
+    .qrbox img, body.big-qr .qrbox img { width: min(60vw, 34vh); }
+    body.two-qr .qrbox img { width: min(40vw, 26vh); }
+    body.s-CHARGING .qrbox img { width: min(34vw, 24vh); }
+  }
+</style>
+</head>
+<body class="s-AWAITING_PAYMENT big-qr offline">
+<header>
+  <div class="brand"><img src="/static/brand/ficha-logo.svg" alt="Ficha" onerror="this.parentNode.classList.add('noimg')"><span class="wordmark">FI<b>C</b>HA</span></div>
+  <div class="station"><span id="stname"></span><span id="stid"></span></div>
+  <div class="state" id="state">connecting</div>
+  <div class="badge-delivering"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2 4 14h7l-1 8 10-12h-7z"/></svg>delivering</div>
+  <div class="spacer"></div>
+  <div class="sid"><span class="k">session</span><b id="sid">&mdash;</b></div>
+  <span class="keys"><span class="key"><kbd>ESC</kbd><span>cut power</span></span><span class="key k-e"><kbd>E</kbd><span>end session</span></span><span class="key k-u"><kbd>U</kbd><span id="ku">unplug</span></span><span class="key k-c"><kbd>C</kbd><span>courtesy</span></span></span>
+</header>
+
+<main>
+  <section class="readings">
+    <div class="live phase" id="phase" role="status">
+      <div class="title" id="phasetitle"></div>
+      <div class="sub" id="phasesub"></div>
+    </div>
+    <div class="live cur">
+      <div class="current">
+        <div class="label">current</div>
+        <div class="value num"><span id="ma">0</span><span class="unit">mA</span></div>
+        <div class="hint" id="mahint"></div>
+      </div>
+    </div>
+    <div class="live tl">
+      <div class="time">
+        <div class="label" id="timelabel">time left</div>
+        <div class="value num" id="time">--:--</div>
+      </div>
+    </div>
+    <div class="row live">
+      <div class="stat fichas">
+        <div class="label">fichas left</div>
+        <div class="value num" id="fichas">0</div>
+      </div>
+      <div class="stat">
+        <div class="label">power <em>measured</em></div>
+        <div class="value num"><span id="watts">0.0</span><small> W</small></div>
+      </div>
+      <div class="stat">
+        <div class="label">energy <em>measured</em></div>
+        <div class="value num"><span id="wh">0.000</span><small> Wh</small></div>
+      </div>
+    </div>
+    <figure class="qrcard lastreceipt">
+      <div class="qrbox"><img id="lastqr" alt="Last session's receipt QR code"></div>
+      <div class="qrnote" id="lastnote"></div>
+    </figure>
+
+    <div class="summary" id="summary">
+      <div class="big">Done. Thank you.</div>
+      <div>Delivery: <span class="verdict" id="verdict">&mdash;</span></div>
+      <div>Charged here <b class="num" id="sumtime">00:00</b> &middot; <b class="num" id="sumfichas">0</b> <span id="sumfichasword">fichas</span> &middot; peak <b class="num" id="sumpeak">0</b> mA</div>
+      <div>Energy <em>measured</em>: <b class="num" id="sumwh">0</b> Wh</div>
+      <div id="sumcut"></div>
+      <div class="chain" id="sumchain"></div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="cta" id="cta">Scan to buy fichas</div>
+    <div class="qrs">
+      <figure class="qrcard wifi">
+        <figcaption><span class="step">1</span> Get online</figcaption>
+        <div class="qrbox"><img id="wifiqr" alt="WiFi QR code"></div>
+        <div class="qrnote">no data plan? join this network first<br><b id="ssid"></b></div>
+      </figure>
+      <figure class="qrcard">
+        <figcaption><span class="step">2</span> Pay</figcaption>
+        <div class="qrbox"><img id="qr" alt="Payment QR code"></div>
+      </figure>
+    </div>
+    <div class="price" id="price"></div>
+    <div class="pricenote" id="pricenote">The QR asks for 1 ficha. Pay 2&times;, 3&times;&hellip; the price for more.
+      Any remainder is logged for refund.</div>
+    <figure class="qrcard receipt">
+      <div class="qrbox"><img id="receiptqr" alt="Receipt QR code"></div>
+      <div class="qrnote" id="receiptnote">scan with the Ficha app to keep it</div>
+    </figure>
+  </aside>
+</main>
+
+<div class="notice" id="notice"></div>
+
+<footer>
+  <span class="h"><span class="dot" id="d-relay"></span><span class="k">relay</span><span id="t-relay"></span></span>
+  <span class="h"><span class="dot" id="d-meter"></span><span class="k">meter</span><span id="t-meter"></span></span>
+  <span class="h"><span class="dot" id="d-horizon"></span><span class="k">horizon</span><span id="t-horizon"></span></span>
+  <span class="h"><span class="dot" id="d-log"></span><span class="k">log</span><span id="t-log"></span></span>
+  <span class="h"><span class="dot" id="d-registry"></span><span class="k">registry</span><span id="t-registry"></span></span>
+  <span class="h escrow"><span class="dot" id="d-escrow"></span><span class="k">escrow</span><span id="t-escrow"></span></span>
+  <span class="net" id="net">&mdash;</span>
+  <span class="h"><span class="k">host</span><b id="host">&mdash;</b></span>
+</footer>
+
+<div class="lost"><img src="/static/brand/ficha-mark.svg" alt="" onerror="this.hidden = true">Station link lost<small>reconnecting&hellip; the relay stays under the server's control</small></div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var ws = null;
+  var lastQr = null;
+  var lastWifi = null;
+  var lastReceipt = null;
+  var lastLastReceipt = null;
+
+  var STATE_TEXT = {
+    AWAITING_PAYMENT: "waiting for payment",
+    COURTESY: "courtesy",
+    CHARGING: "charging",
+    FINISHED: "finished"
+  };
+
+  // Same format as the server's time_text: two-digit minutes, e.g. 05:00.
+  function mmss(s) {
+    s = Math.max(0, Math.round(s));
+    var m = Math.floor(s / 60), r = s % 60;
+    return (m < 10 ? "0" : "") + m + ":" + (r < 10 ? "0" : "") + r;
+  }
+  function group(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " "); }
+  // An amount as the price is shown: "0.3500000" -> "0.35".
+  function amount(s) { return String(s).indexOf(".") < 0 ? String(s) : String(s).replace(/\.?0+$/, ""); }
+  // Custody deadlines are ledger time, unix seconds: the minutes left to
+  // claim, counted from ledger time as the station has it. Never a time of
+  // day: this computer's clock or time zone may not be the payer's phone's.
+  function claimLeft(deadline, d) {
+    var now = d.custody ? d.custody.ledger_time : Date.now() / 1000;
+    var m = Math.floor((deadline - now) / 60);
+    return m >= 1 ? "within " + m + " min" : "within a minute";
+  }
+  // A ledger transaction, short; a debug one never reached the ledger.
+  function txShort(h) { return !h ? "" : h.indexOf("debug-") === 0 ? "simulated" : h.slice(0, 8) + "…"; }
+  // Custody: what the receipt gives back, and until when (section 7.5).
+  function custodyRefund(last, d) {
+    var c = last.custody, h = last.refund_hint || {};
+    if (c.settled) return "settled on the ledger: " + amount(c.settled.to_payer) + " " + d.asset + " back to the payer.";
+    if (!(c.to_payer > 0)) return "all the paid time was charged here: nothing to refund.";
+    return "scan the receipt with the Ficha app to get " + amount(h.to_payer) + " " + d.asset + " back (the time not "
+      + "charged here)" + (c.deadline ? ", " + claimLeft(c.deadline, d) : "") + ".";
+  }
+  function dot(id, cls, text) {
+    $("d-" + id).className = "dot " + cls;
+    $("t-" + id).textContent = text;
+  }
+  // The notice stays on one line: one too wide for the screen is set
+  // smaller, down to half size, and only past that ends in "…".
+  function notice(text) {
+    var n = $("notice");
+    n.textContent = text;
+    n.style.fontSize = "";
+    if (n.scrollWidth <= n.clientWidth) return;
+    var cs = getComputedStyle(n);
+    var room = n.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    var range = document.createRange();
+    range.selectNodeContents(n);
+    var size = parseFloat(cs.fontSize);
+    n.style.fontSize = Math.max(size / 2, Math.floor(size * room / range.getBoundingClientRect().width)) + "px";
+  }
+
+  // The big numbers take the height the screen gives them and are set
+  // smaller only when a long reading ("12 345 mA") would not fit its column.
+  function fit(el) {
+    el.style.fontSize = "";
+    var room = el.clientWidth;
+    if (!room || el.scrollWidth <= room) return;
+    el.style.fontSize = Math.floor(parseFloat(getComputedStyle(el).fontSize) * room / el.scrollWidth) + "px";
+  }
+  function fitAll() {
+    var big = document.querySelectorAll(".current .value, .time .value, .stat .value, .summary .big");
+    for (var i = 0; i < big.length; i++) fit(big[i]);
+  }
+
+  function render(d) {
+    var st = d.state;
+    var body = document.body;
+    body.className = "s-" + st;
+    if (st === "AWAITING_PAYMENT" || st === "COURTESY") body.classList.add("big-qr");
+    // Custody: paid by deposit into the escrow contract, the unused time
+    // refunded by the receipt's proof (docs/station-app-contract.md, section 7).
+    var custody = d.mode === "custody";
+    if (custody) body.classList.add("custody");
+    if (d.last_receipt) body.classList.add("has-last");
+    if (d.mock) body.classList.add("mock");
+    if (d.delivering) body.classList.add("delivering");
+    // A payment now would buy no energy: refused while the relay is not
+    // answering, neither credited nor logged while the log cannot be
+    // written. No pay QR is shown in any state.
+    var oos = st !== "FINISHED" && (!d.relay.healthy || !!d.out_of_service);
+    if (oos) body.classList.add("oos");
+    // At MAX_SESSION_MINUTES a payment would be capped, taken for no energy.
+    var full = st === "CHARGING" && d.can_add === false;
+    if (full) body.classList.add("full");
+    if (d.receipt) body.classList.add("has-receipt");
+    // The network is offered, never required: its QR sits next to the pay QR
+    // while waiting for a payment, and goes away once charging.
+    if (d.wifi && (st === "AWAITING_PAYMENT" || st === "COURTESY") && !oos) body.classList.add("two-qr");
+    // Paid time counts only while this station is verified to be charging
+    // the phone: until then, during a check, and while paused, it stands still.
+    var ch = d.charge || {};
+    var ph = st === "CHARGING" && ch.phase !== "running" ? ch.phase : null;
+    if (ph) body.classList.add("ph-" + ph);
+    if (ph && ch.reason === "elsewhere") body.classList.add("ph-elsewhere");
+
+    // Current is back but the next check may not run yet: count down to it,
+    // never ask for a phone that is already plugged in.
+    var pending = ch.reason === "check_pending";
+    var nextCheck = ch.check_seconds_left ? "in " + ch.check_seconds_left + " s" : "shortly";
+    // A check that did not pass, and current still flowing: the next one.
+    var again = ch.reason === "elsewhere" || ch.reason === "unchecked" ? "Checked again " + nextCheck + ". " : "";
+    $("state").textContent = ph === "waiting" ? (pending ? "check pending" : "plug in") : ph === "checking" ? "checking"
+      : ph === "paused" ? "paused" : STATE_TEXT[st] || st;
+    var title = "", sub = "";
+    if (ph === "waiting") {
+      title = ch.reason === "elsewhere" ? "This phone is charging from another source"
+        : pending ? "Current detected: checking " + nextCheck : "Plug your phone into this station";
+      sub = (ch.reason === "elsewhere" ? "Plug it into this station. "
+        : pending ? "Keep it plugged into this station. "
+        : ch.reason_text ? ch.reason_text.charAt(0).toUpperCase() + ch.reason_text.slice(1) + ". " : "")
+        + again + "Your time starts only when the station detects the charge. "
+        + mmss(ch.plug_seconds_left) + " to plug in, or the whole time "
+        + (custody ? "comes back with the receipt." : "is logged for refund.");
+    } else if (ph === "checking") {
+      title = "Checking the charge…";
+      sub = "Power off for " + ch.probe_seconds + " s to confirm the phone charges from this station. Not counted.";
+    } else if (ph === "paused") {
+      title = pending ? "Paused: current detected, checking " + nextCheck
+        : "Paused: " + (ch.reason_text || "no charging current");
+      sub = "Time is not counting. " + (pending ? "Keep the phone plugged into this station to resume. "
+        : "Plug the phone into this station to resume. ") + again
+        + mmss(ch.pause_seconds_left) + " left, then the session ends and the rest "
+        + (custody ? "comes back with the receipt." : "is logged for refund.");
+    }
+    $("phasetitle").textContent = title;
+    $("phasesub").textContent = sub;
+    $("stname").textContent = d.station_name || "";
+    $("stid").textContent = d.station_id ? (d.station_name ? "\u00a0·\u00a0" : "") + d.station_id : "";
+    $("sid").textContent = d.session_id;
+
+    // current: the protagonist. Discharge (negative) shows as 0.
+    var ma = d.current_ma;
+    $("ma").textContent = ma === null ? "—" : group(Math.max(0, ma));
+    var hint = "";
+    if (ph === "checking") hint = "relay open for the check";
+    else if (ph && ma !== null && !d.held && ma >= d.min_current_ma)
+      hint = "the phone's own reading: " + (pending ? "not checked yet" : "not from this station yet");
+    else if (d.waiting_for_device) hint = "waiting for the phone…";
+    else if (ma === null) hint = "meter unavailable";
+    else if (d.held) hint = "last reading held (meter degraded)";
+    else if (ma < 0) hint = "not charging";
+    else if (st === "CHARGING" && !d.delivering) hint = "waiting for current";
+    else if (d.voltage_mv) hint = "battery " + (d.voltage_mv / 1000).toFixed(2) + " V";
+    $("mahint").textContent = hint;
+
+    // time: courtesy left, paid time left, or 00:00
+    if (st === "COURTESY") $("timelabel").textContent = "courtesy left";
+    else if (ph === "waiting") $("timelabel").textContent = "time left · starts when charging here";
+    else if (ph === "checking") $("timelabel").textContent = "time left · not counting";
+    else if (ph === "paused") $("timelabel").textContent = "time left · paused";
+    else if (st === "CHARGING" && d.waiting_for_device) $("timelabel").textContent = "time left (starts when the phone is back)";
+    else $("timelabel").textContent = "time left";
+    $("time").textContent = d.time_text || "--:--";  // absent only from a server older than this page
+
+    $("fichas").textContent = d.fichas_left;
+    $("watts").textContent = (d.watts || 0).toFixed(1);
+    $("wh").textContent = (d.wh || 0).toFixed(3);
+
+    // QR
+    if (d.qr !== lastQr) { $("qr").src = d.qr; lastQr = d.qr; }
+    var wifiQr = d.wifi ? d.wifi.qr : null;
+    if (wifiQr && wifiQr !== lastWifi) { $("wifiqr").src = wifiQr; lastWifi = wifiQr; }
+    $("ssid").textContent = d.wifi ? d.wifi.ssid : "";
+    var receiptQr = d.receipt ? d.receipt.qr : null;
+    if (receiptQr && receiptQr !== lastReceipt) { $("receiptqr").src = receiptQr; lastReceipt = receiptQr; }
+    var lr = d.last_receipt;
+    if (lr && lr.qr !== lastLastReceipt) { $("lastqr").src = lr.qr; lastLastReceipt = lr.qr; }
+    if (lr) {
+      $("lastnote").innerHTML = "";
+      var head = document.createElement("b");
+      // Two receipts waiting to be claimed take turns here: which one this is.
+      var turn = d.last_receipt_turn ? " · " + d.last_receipt_turn[0] + "/" + d.last_receipt_turn[1] : "";
+      head.textContent = (lr.full ? "Not served: " : "Previous customer: ") + amount(lr.to_payer) + " " + lr.asset + " back" + turn;
+      $("lastnote").appendChild(head);
+      // A ficha: link, not a web address: a phone camera does not open it,
+      // the Ficha app's Scan QR does.
+      $("lastnote").appendChild(document.createTextNode(
+        "Not a pay QR: open it with Scan QR in the Ficha app. Only the wallet that paid " + lr.session_id
+        + " can claim it" + (lr.deadline ? ", " + claimLeft(lr.deadline, d) : "") + "."));
+    }
+    // Custody: no memo, no remainder. The app pays exact fichas, and the
+    // receipt returns the time not charged here.
+    $("pricenote").textContent = custody
+      ? "Pay with the Ficha app and pick the fichas there. The time not charged here comes back to you with the receipt."
+      : "The QR asks for 1 ficha. Pay 2×, 3×… the price for more. Any remainder is logged for refund.";
+    $("receiptnote").textContent = custody && d.last && d.last.custody && d.last.custody.to_payer > 0
+      && !d.last.custody.settled ? "scan with the Ficha app to get your refund" : "scan with the Ficha app to keep it";
+    var cta = "Scan to buy fichas";
+    if (st === "CHARGING") cta = full ? "Session limit reached" : "Add fichas";
+    else if (st === "COURTESY") cta = "Scan now to keep charging";
+    else if (st === "FINISHED") cta = d.receipt ? "Your receipt" : "Next session starting…";
+    if (oos) cta = "Out of service";
+    $("cta").textContent = cta;
+    $("ku").textContent = d.mock_plug === "station" ? "unplug" : "plug in";
+    $("price").innerHTML = full ? "No more fichas: at most <b>" + d.max_session_minutes + " min</b> per session"
+      : "1 ficha = <b>" + d.ficha_minutes + " min</b> = <b>" + d.ficha_price + " " + d.asset + "</b>";
+
+    // finished summary
+    var last = d.last;
+    if (st === "FINISHED" && last) {
+      var v = last.verdict || "none";
+      $("verdict").textContent = v.replace("_", " ");
+      $("verdict").className = "verdict " + v;
+      // Time this station was verified to be charging the phone: the receipt's u.
+      var used = last.consumed_seconds;
+      if (used === undefined || used === null) used = (last.paid_seconds || 0) - (last.capped_seconds || 0) - (last.unused_seconds || 0);
+      $("sumtime").textContent = mmss(used);
+      $("sumfichas").textContent = last.fichas;
+      $("sumfichasword").textContent = last.fichas === 1 ? "ficha" : "fichas";
+      $("sumpeak").textContent = group(last.max_current_ma);
+      $("sumwh").textContent = Number(last.wh).toFixed(3);
+      // Paid time not consumed, or beyond the session limit, is logged for a
+      // manual refund: the screen says so, whatever ended the session. Named
+      // apart: the time left is what the countdown showed, and the time
+      // beyond the limit never was on it.
+      var unused = last.unused_seconds || 0, capped = last.capped_seconds || 0, parts = [];
+      if (unused > 0) parts.push("the time left (" + mmss(unused) + ")");
+      if (capped > 0) parts.push("the time paid beyond the session limit (" + mmss(capped) + ")");
+      var refund = parts.length ? parts.join(" and ") + (parts.length > 1 ? " are" : " is") + " logged for refund." : "";
+      // Custody: nothing is refunded by hand, the receipt's proof does it.
+      if (last.custody) refund = custodyRefund(last, d);
+      var why = { emergency_stop: "Stopped by the operator" + (refund ? ": " + refund : "."),
+                  stopped: "Ended early" + (refund ? ": " + refund : "."),
+                  not_plugged: last.custody ? "The phone never charged from this station: " + refund
+                    : "The phone never charged from this station: nothing was used, the paid time is logged for refund.",
+                  paused_too_long: "Paused too long" + (refund ? ": " + refund : "."),
+                  deadline: "Ended " + Math.round((d.custody ? d.custody.claim_window_seconds : 900) / 60)
+                    + " min before the contract's deadline, so you can still claim: " + refund };
+      $("sumcut").textContent = why[last.end_reason] || (refund && refund.charAt(0).toUpperCase() + refund.slice(1));
+      // Custody: where to see it on the ledger.
+      var pay0 = (last.payments || [])[0] || {}, set = last.custody && last.custody.settled;
+      $("sumchain").textContent = last.custody ? "on Stellar · escrow " + (d.escrow ? d.escrow.contract : "")
+        + (pay0.tx_hash ? " · deposit tx " + txShort(pay0.tx_hash) : "")
+        + (set && set.tx_hash ? " · settle tx " + txShort(set.tx_hash) : "") : "";
+    }
+
+    notice(d.notice || (d.mock_payment ? "SIMULATED — fake payments via POST /debug/pay" : ""));
+    fitAll();
+
+    // footer health
+    var r = d.relay;
+    dot("relay", r.healthy ? "ok" : "bad", (r.healthy ? (r.open ? "open (off)" : "closed (on)") : r.error) + (d.mock ? " · mock" : ""));
+    dot("meter", d.meter === "ok" ? "ok" : d.meter === "degraded" ? "warn" : (d.powered ? "bad" : "off"),
+        d.meter + " · " + d.meter_kind);
+    var h = d.horizon;
+    dot("horizon", h.status === "ok" ? "ok" : h.status === "error" ? "bad" : "off", h.status + (h.detail ? " · " + h.detail : ""));
+    var lg = d.log || { status: "unknown", detail: "" };
+    dot("log", lg.status === "ok" ? "ok" : lg.status === "error" ? "bad" : "off", lg.status + (lg.detail ? " · " + lg.detail : ""));
+    // Checked at startup against the signed registry; "unchecked" = started
+    // offline. Custody: read again every minute, "mismatch" = it changed under
+    // the running station (out of service until restarted with its values).
+    var rg = d.registry || { status: "off", detail: "" };
+    dot("registry", rg.status === "ok" ? "ok" : rg.status === "unchecked" ? "warn" : rg.status === "mismatch" ? "bad" : "off",
+        rg.status + (rg.detail ? " · " + rg.detail : ""));
+    // Custody: the contract, its events, whether its terms were checked at
+    // startup, and this computer's clock when it is far from ledger time
+    // (deadlines follow the ledger anyway; the log's times do not).
+    var es = d.escrow, skew = d.custody ? d.custody.clock_skew : null;
+    if (es) dot("escrow", es.status === "error" || es.mismatch ? "bad" : es.check === "unchecked" || skew ? "warn" : es.status === "ok" ? "ok" : "off",
+                (es.contract ? es.contract + " · " : "") + (es.mismatch ? "mismatch: " + es.mismatch + " · " : "")
+                + (es.check === "unchecked" ? "unchecked · " : "") + es.status
+                + (es.detail ? " · " + es.detail : "")
+                + (skew ? " · clock " + Math.max(1, Math.round(Math.abs(skew) / 60)) + " min " + (skew > 0 ? "ahead" : "behind") : ""));
+    var net = $("net");
+    net.textContent = d.network === "public" ? "MAINNET" : "TESTNET";
+    net.className = "net " + d.network;
+    $("host").textContent = d.host_key_short;
+  }
+
+  function connect() {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/ws");
+    ws.onopen = function () { document.body.classList.remove("offline"); };
+    ws.onmessage = function (ev) {
+      try { render(JSON.parse(ev.data)); } catch (e) { console.error(e); }
+    };
+    ws.onclose = function () {
+      document.body.classList.add("offline");
+      setTimeout(connect, 1000);
+    };
+  }
+
+  function send(key) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ key: key }));
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { send("escape"); e.preventDefault(); }
+    // Ctrl+C (copying the session ID or the host key) is not a courtesy, and
+    // neither is a held key: a courtesy closes the relay and starts the cooldown.
+    else if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) { send("c"); }
+    // E ends the session for its payer (not an emergency: ESC is); the time
+    // not charged comes back as at any other end. Never with a modifier.
+    else if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) { send("e"); }
+    // MOCK only (the server ignores it otherwise): U unplugs the simulated
+    // phone, or plugs it back into this station.
+    else if ((e.key === "u" || e.key === "U") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) { send("u"); }
+  });
+
+  window.addEventListener("resize", fitAll);
+  if (document.fonts) document.fonts.addEventListener("loadingdone", fitAll);
+  connect();
+})();
+</script>
+</body>
+</html>

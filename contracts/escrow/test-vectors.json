@@ -1,0 +1,290 @@
+{
+  "format": "ficha-escrow-vectors/1",
+  "about": "Shared test vectors for FichaEscrow (docs/station-app-contract.md, section 7). c[0] = seed, c[i+1] = sha256(c[i]) over the 32 raw bytes, anchor = c[n], the proof for u unused units is c[n-u]. base64url is RFC 4648 section 5 without padding. Amounts are strings (i128). Checked by the contract's tests, the station and the app.",
+  "chains": [
+    {
+      "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "seed_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "n": 120,
+      "anchor_hex": "4c6f4ecc2381dc2428f35a50614d04919f2fb039310ada7a104316954a002b7b",
+      "anchor_b64url": "TG9OzCOB3CQo81pQYU0EkZ8vsDkxCtp6EEMWlUoAK3s",
+      "proofs": [
+        {
+          "u": 0,
+          "proof_hex": "4c6f4ecc2381dc2428f35a50614d04919f2fb039310ada7a104316954a002b7b",
+          "proof_b64url": "TG9OzCOB3CQo81pQYU0EkZ8vsDkxCtp6EEMWlUoAK3s"
+        },
+        {
+          "u": 1,
+          "proof_hex": "4870cbd2ea43b33ec57e2a873b7c2fa4ff03025b5beb6639f0aa43bf18e18043",
+          "proof_b64url": "SHDL0upDsz7FfiqHO3wvpP8DAltb62Y58KpDvxjhgEM"
+        },
+        {
+          "u": 2,
+          "proof_hex": "b7a5096e14d785e29c263d4462f7c3cfeefbe4c0500746508e83110ae6c3f127",
+          "proof_b64url": "t6UJbhTXheKcJj1EYvfDz-775MBQB0ZQjoMRCubD8Sc"
+        },
+        {
+          "u": 7,
+          "proof_hex": "8ddecfd26f21b6fb7cca77724040fd98c3303ad73af5bf042284f70abdea519b",
+          "proof_b64url": "jd7P0m8htvt8yndyQED9mMMwOtc69b8EIoT3Cr3qUZs"
+        },
+        {
+          "u": 10,
+          "proof_hex": "88b9452c44ac6e908eb7f77062e61f1780479db4f2bdc0645193a4cf4dc195f4",
+          "proof_b64url": "iLlFLESsbpCOt_dwYuYfF4BHnbTyvcBkUZOkz03BlfQ"
+        },
+        {
+          "u": 20,
+          "proof_hex": "c52c3a8d9b06a3d626847b35af9fbe187650a112952dc0edecf9a4337b7e6a53",
+          "proof_b64url": "xSw6jZsGo9YmhHs1r5--GHZQoRKVLcDt7PmkM3t-alM"
+        },
+        {
+          "u": 119,
+          "proof_hex": "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd",
+          "proof_b64url": "Yw3NKWbEM2aRElRIu7JbT_QSpJxzLbLIq8G4WBvXEN0"
+        },
+        {
+          "u": 120,
+          "proof_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+          "proof_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        }
+      ]
+    },
+    {
+      "seed_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "seed_b64url": "__________________________________________8",
+      "n": 240,
+      "anchor_hex": "9a40f99e603e6d26bcff2cd2482616d0b9bbfa03374155df206c8a7dd431fe05",
+      "anchor_b64url": "mkD5nmA-bSa8_yzSSCYW0Lm7-gM3QVXfIGyKfdQx_gU",
+      "proofs": [
+        {
+          "u": 0,
+          "proof_hex": "9a40f99e603e6d26bcff2cd2482616d0b9bbfa03374155df206c8a7dd431fe05",
+          "proof_b64url": "mkD5nmA-bSa8_yzSSCYW0Lm7-gM3QVXfIGyKfdQx_gU"
+        },
+        {
+          "u": 15,
+          "proof_hex": "fcb15f580740fcbb051767f4493ff78a0c080833fd7290c65ccb6be41f44e6d8",
+          "proof_b64url": "_LFfWAdA_LsFF2f0ST_3igwICDP9cpDGXMtr5B9E5tg"
+        },
+        {
+          "u": 239,
+          "proof_hex": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+          "proof_b64url": "r5YTdg9yY1-9tEpaCmPDnxKvMPlQpu5clxvhiOicQFE"
+        },
+        {
+          "u": 240,
+          "proof_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "proof_b64url": "__________________________________________8"
+        }
+      ]
+    },
+    {
+      "seed_hex": "a71701aa189a94cd7e35e1fba1416b52a1d30ae6f24582e027d7f6f3ef6f9db6",
+      "seed_b64url": "pxcBqhialM1-NeH7oUFrUqHTCubyRYLgJ9f28-9vnbY",
+      "n": 3,
+      "anchor_hex": "c469c6a8960f1592cf46ecab36627159e82ca537bdb53457003dbb7825b707ba",
+      "anchor_b64url": "xGnGqJYPFZLPRuyrNmJxWegspTe9tTRXAD27eCW3B7o",
+      "proofs": [
+        {
+          "u": 0,
+          "proof_hex": "c469c6a8960f1592cf46ecab36627159e82ca537bdb53457003dbb7825b707ba",
+          "proof_b64url": "xGnGqJYPFZLPRuyrNmJxWegspTe9tTRXAD27eCW3B7o"
+        },
+        {
+          "u": 1,
+          "proof_hex": "261257eab8f7b31e5dc22e24000ba634f9feea110f7c2ba9bd9133b91d3110c7",
+          "proof_b64url": "JhJX6rj3sx5dwi4kAAumNPn-6hEPfCupvZEzuR0xEMc"
+        },
+        {
+          "u": 2,
+          "proof_hex": "f0e11b3e47f54d987fa982b6d80583846a0506b1fde86d40d13f453881feb1cf",
+          "proof_b64url": "8OEbPkf1TZh_qYK22AWDhGoFBrH96G1A0T9FOIH-sc8"
+        },
+        {
+          "u": 3,
+          "proof_hex": "a71701aa189a94cd7e35e1fba1416b52a1d30ae6f24582e027d7f6f3ef6f9db6",
+          "proof_b64url": "pxcBqhialM1-NeH7oUFrUqHTCubyRYLgJ9f28-9vnbY"
+        }
+      ],
+      "chain_hex": [
+        "a71701aa189a94cd7e35e1fba1416b52a1d30ae6f24582e027d7f6f3ef6f9db6",
+        "f0e11b3e47f54d987fa982b6d80583846a0506b1fde86d40d13f453881feb1cf",
+        "261257eab8f7b31e5dc22e24000ba634f9feea110f7c2ba9bd9133b91d3110c7",
+        "c469c6a8960f1592cf46ecab36627159e82ca537bdb53457003dbb7825b707ba"
+      ]
+    }
+  ],
+  "unused_units": [
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 400,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 7
+    },
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 600,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 0
+    },
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 0,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 20
+    },
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 599,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 1
+    },
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 570,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 1
+    },
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 569,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 2
+    },
+    {
+      "paid_seconds": 600,
+      "consumed_seconds": 601,
+      "unit_seconds": 30,
+      "paid_units": 20,
+      "u": 0
+    },
+    {
+      "paid_seconds": 3600,
+      "consumed_seconds": 1234,
+      "unit_seconds": 30,
+      "paid_units": 120,
+      "u": 79
+    },
+    {
+      "paid_seconds": 60,
+      "consumed_seconds": 31,
+      "unit_seconds": 15,
+      "paid_units": 4,
+      "u": 2
+    }
+  ],
+  "payer_share": [
+    {
+      "amount": "20000000",
+      "paid_units": 20,
+      "u": 7,
+      "to_payer": "7000000",
+      "to_host": "13000000"
+    },
+    {
+      "amount": "20000000",
+      "paid_units": 20,
+      "u": 0,
+      "to_payer": "0",
+      "to_host": "20000000"
+    },
+    {
+      "amount": "20000000",
+      "paid_units": 20,
+      "u": 20,
+      "to_payer": "20000000",
+      "to_host": "0"
+    },
+    {
+      "amount": "20000000",
+      "paid_units": 20,
+      "u": 25,
+      "to_payer": "20000000",
+      "to_host": "0"
+    },
+    {
+      "amount": "10000001",
+      "paid_units": 10,
+      "u": 3,
+      "to_payer": "3000001",
+      "to_host": "7000000"
+    },
+    {
+      "amount": "14",
+      "paid_units": 6,
+      "u": 1,
+      "to_payer": "3",
+      "to_host": "11"
+    },
+    {
+      "amount": "14",
+      "paid_units": 6,
+      "u": 5,
+      "to_payer": "12",
+      "to_host": "2"
+    },
+    {
+      "amount": "120000000",
+      "paid_units": 120,
+      "u": 1,
+      "to_payer": "1000000",
+      "to_host": "119000000"
+    },
+    {
+      "amount": "12",
+      "paid_units": 120,
+      "u": 1,
+      "to_payer": "1",
+      "to_host": "11"
+    }
+  ],
+  "deadline": [
+    {
+      "opened": 1000000,
+      "total_fichas": 2,
+      "ficha_seconds": 300,
+      "grace_seconds": 1680,
+      "deadline": 1002280
+    }
+  ],
+  "pay_link": {
+    "app_url": "https://ficha-stellar.vercel.app",
+    "network": "t",
+    "host": "GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6",
+    "station": "ERZGCG",
+    "session": "F3H9TXAB",
+    "anchor_b64url": "TG9OzCOB3CQo81pQYU0EkZ8vsDkxCtp6EEMWlUoAK3s",
+    "link": "https://ficha-stellar.vercel.app/p?v=1&n=t&h=GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6&s=ERZGCG&x=F3H9TXAB&a=TG9OzCOB3CQo81pQYU0EkZ8vsDkxCtp6EEMWlUoAK3s",
+    "link_without_app_url": "ficha:/p?v=1&n=t&h=GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6&s=ERZGCG&x=F3H9TXAB&a=TG9OzCOB3CQo81pQYU0EkZ8vsDkxCtp6EEMWlUoAK3s"
+  },
+  "receipt_v2": {
+    "about": "chain 0 (n 120): paid 2 fichas of 300 s at unit 30 s = 20 units, consumed 400 s, so u = 7 and z = c[113]",
+    "params": {
+      "v": "2",
+      "m": "ERZGCG.F3H9TXAB",
+      "n": "t",
+      "h": "GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6",
+      "a": "2",
+      "k": "XLM",
+      "f": "2",
+      "p": "600",
+      "u": "400",
+      "wh": "1.234",
+      "x": "1500",
+      "vd": "d",
+      "c": "1",
+      "t": "1790000000",
+      "q": "7",
+      "z": "jd7P0m8htvt8yndyQED9mMMwOtc69b8EIoT3Cr3qUZs"
+    },
+    "link": "https://ficha-stellar.vercel.app/r?v=2&m=ERZGCG.F3H9TXAB&n=t&h=GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6&a=2&k=XLM&f=2&p=600&u=400&wh=1.234&x=1500&vd=d&c=1&t=1790000000&q=7&z=jd7P0m8htvt8yndyQED9mMMwOtc69b8EIoT3Cr3qUZs"
+  }
+}

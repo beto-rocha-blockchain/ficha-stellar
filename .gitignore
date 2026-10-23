@@ -1,0 +1,10 @@
+/target
+.env
+.venv/
+__pycache__/
+sessions.jsonl
+.horizon_cursor*
+.escrow_cursor*
+# Local tooling and stray files, never published
+.claude/
+abi.txt

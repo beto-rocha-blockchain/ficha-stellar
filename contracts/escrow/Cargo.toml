@@ -1,0 +1,37 @@
+# FichaEscrow, the custody contract (docs/station-app-contract.md, section 7).
+# Its own workspace. Build and test in WSL (see README.md).
+
+[package]
+name = "ficha-escrow"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "28.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "28.0.0", features = ["testutils"] }
+serde_json = "1"
+# Tests only: the host's storage access types (test_footprint.rs) and a
+# secp256r1 signer for a contract-account payer (test_account.rs). The same
+# versions soroban-sdk already locks.
+soroban-env-host = "=28.0.2"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[workspace]

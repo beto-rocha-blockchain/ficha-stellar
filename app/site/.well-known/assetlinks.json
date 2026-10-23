@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.ficha.wallet",
+      "sha256_cert_fingerprints": [
+        "13:7F:5E:AC:ED:E0:13:3D:24:FF:AA:A8:E7:76:BA:12:79:BB:B4:A5:BA:87:CC:24:40:D6:FD:FD:36:3A:D2:4B"
+      ]
+    }
+  }
+]
