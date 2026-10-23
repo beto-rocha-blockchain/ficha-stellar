@@ -1,6 +1,6 @@
 # Pitch outline
 
-Two versions: a 12-slide deck for the live pitch and the mentors, and a
+Two versions: a 13-slide deck for the live pitch and the mentors, and a
 4-slide PDF in the format the 2025 rules asked for (Solution, PMF, Technical
 Workflow, Team). Every number on a slide must come from the repository or
 from a cited source; the notes say where.
@@ -24,7 +24,11 @@ The 2026 rules are published on the build page
   the pre-event intake, SCF eligibility, production readiness and
   ecosystem impact.
 
-## The 12-slide deck
+## The 13-slide deck
+
+Slide 10, public safety, was added on 23 October 2026, after the paid
+flow's slides: it follows Why Stellar, since paying with no mobile data
+rests on the same Stellar pieces, and leads into the markets of slide 11.
 
 ### 1. Ficha: phone charging by the minute, on Stellar
 
@@ -121,7 +125,33 @@ The 2026 rules are published on the build page
   the money. Fees measured on testnet: a deposit about 0.036 XLM (mostly
   rent), a claim about 0.0024 XLM.
 
-### 10. Lisbon and the EU
+### 10. A charging point that can save a call
+
+- Where a dead phone is dangerous: bus and train stations, airports, remote
+  places, neighbourhoods with high rates of violence or kidnapping.
+- Once a day, every phone: 2 minutes of charging (the station's relay) and
+  2 minutes of internet (the station's Wi-Fi router), free, with the local
+  emergency numbers first (112; in Brazil 190, 192 and 193).
+- Paying needs no mobile data: on the station's Wi-Fi, the Ficha app and the
+  Stellar endpoints it uses are open before any sign-in.
+- Privacy: a phone is a salted hash of its Wi-Fi MAC address, with a new
+  salt every day; no MAC, IP or name is kept. No money moves for a free
+  minute, and the station holds no key and no password, not even the
+  router's.
+- Picture: the Wi-Fi's page on a phone (the emergency numbers first, the
+  two free buttons, Pay with Ficha) next to the station screen's emergency
+  band.
+- Notes: say plainly that Ficha is not an emergency service and does not
+  replace one; that the 2 minutes of internet are a courtesy for an
+  ordinary phone, not a hard limit (shared hosting addresses, phones that
+  change their MAC address); and that the router's side runs on the real
+  router for the first time at the event. Who pays for the free minutes:
+  the venue today (a free charge is a fraction of a cent of electricity, an
+  estimate); a city, an NGO or a sponsor next; sponsored fichas on the
+  ledger are on the roadmap, not built. Sources: `docs/public-safety.md`,
+  the `.env` examples (120 + 120 seconds, the numbers).
+
+### 11. Lisbon and the EU
 
 - Price in EURC (Circle states it is MiCA-compliant) and buy it through a
   SEPA anchor: both on the roadmap.
@@ -130,24 +160,30 @@ The 2026 rules are published on the build page
 - Notes: the MiCA framing of an escrow with no admin has not been checked
   yet; say so if asked.
 
-### 11. Built before the event, and what it took
+### 12. Built before the event, and what it took
 
 - Scale path: the whole product was built before HackMeridian, from 28
   September 2026. The public repository's first commit is tagged
   `pre-hackmeridian`; anything done at the event comes after it.
-- Tests: 447 station checks, 336 app tests, 37 contract tests (23 October).
+- Tests: 574 station checks, 336 app tests, 37 contract tests, and 61 + 83
+  checks of the router's scripts (23 October).
+- Public safety mode, built on 23 October and off by default; its router
+  side set up on the real router at the table is the event's milestone,
+  in dated commits after the tag.
 - Testnet: recorded runs with every transaction linked (deposit, top-up,
   claim, `pay_host`, release, a squatter's session kept apart,
   `TermsChanged` before signing).
 - Notes: update the numbers from the suites the day before; never round up.
 
-### 12. Next, and the ask
+### 13. Next, and the ask
 
 - Roadmap: strict delivery proof, the payer's app as a witness, a metered
   outlet with an attestation key, EURC and a SEPA anchor, passkey smart
-  accounts, a ring of session slots, an audit before custody on mainnet.
+  accounts, a ring of session slots, an audit before custody on mainnet;
+  for public safety, sponsored fichas on the ledger.
 - The ask: mentors' review of the escrow and the hash-chain design; a venue
-  in Lisbon for a pilot; introductions to an EU anchor.
+  in Lisbon for a pilot; introductions to an EU anchor; a city, a transport
+  operator or an NGO for a public safety pilot.
 - Team, and the links: the app, the repository, the contract on
   stellar.expert.
 
@@ -161,6 +197,9 @@ The 2026 rules are published on the build page
   receipt with "Refund received".
 - The two modes: direct SEP-7 to the venue (mainnet default), custody
   through FichaEscrow (testnet demo stations).
+- Public safety mode: 2 min of charge and 2 min of internet free per phone
+  per day, the emergency numbers first, paying with no mobile data; not an
+  emergency service.
 
 ### 2. PMF
 
@@ -172,6 +211,9 @@ The 2026 rules are published on the build page
   users per SIBS' 2025 report); EURC is available on Stellar.
 - What a pilot would measure: sessions per day, minutes charged against
   minutes paid, refunds claimed, venue revenue.
+- Where a phone is a lifeline: transit hubs, remote places, areas with high
+  rates of violence or kidnapping; a venue, a city, an NGO or a sponsor
+  funds the free emergency minutes.
 
 ### 3. Technical Workflow
 

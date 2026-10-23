@@ -4,6 +4,9 @@
                     always a QR on screen, so there is no separate IDLE.
   COURTESY          relay closed for COURTESY_SECONDS, free, once per session
                     ID. A payment with the current memo turns it into CHARGING.
+                    Also a device's free emergency charge (FREE_CHARGE_SECONDS,
+                    from the Wi-Fi portal, once per device per day), which
+                    keeps the session ID on screen.
   CHARGING          relay closed, countdown of fichas x FICHA_MINUTES. A new
                     payment with the same memo adds fichas and extends it.
   FINISHED          relay open, totals on screen, cut being confirmed. Then
@@ -67,7 +70,7 @@ from escrow import (
     payer_share, price_stroops, proof, station_terms, to_amount, unused_units,
 )
 from escrow import deadline as escrow_deadline
-from meter import Reading
+from meter import Reading, plugged
 from relay import Relay
 from stellar import Payment, format_amount, memo_station, new_session_id, payment_key, session_memo
 
@@ -166,6 +169,8 @@ class SessionLog:
       session     a closed session with its verdict (end_reason "interrupted"
                   when it was rebuilt at startup from the lines above)
       orphan, underpaid, refused   payments that were not credited
+      free_grant  a device's free emergency minutes (WIFI_PORTAL): its id of
+                  the day, what, seconds, when; never its MAC or IP
     Custody mode adds:
       seed        a session's hash chain seed, before its pay link shows
       consumed    a running session's consumed time, every CHECKPOINT_SECONDS
@@ -242,6 +247,8 @@ class Session:
     courtesy_used: bool = False
     courtesy_max_ma: int = 0  # measured during courtesy; never part of the verdict
     courtesy_wh: float = 0.0
+    # The courtesy was a device's free emergency charge (portal), not the C key.
+    free_charge: bool = False
     payments: list[dict] = field(default_factory=list)
     fichas: int = 0
     amount: Decimal = Decimal(0)
@@ -269,7 +276,8 @@ class Session:
     probe_started: float | None = None
     probe_from: str | None = None  # the phase the probe interrupted
     probe_before_ma: int = 0  # the reading that started the probe
-    probe_reads: list[tuple[int, bool]] = field(default_factory=list)  # (mA, ok) with the relay open
+    # (mA, ok, plugged) with the relay open; plugged is None when the meter cannot tell
+    probe_reads: list[tuple[int, bool, bool | None]] = field(default_factory=list)
     probes_passed: int = 0
     probes_failed: int = 0
     last_probe_end: float | None = None
@@ -296,6 +304,7 @@ class Session:
     last_ok_at: float | None = None  # last good meter reading while powered
     last_ok_ma: int = 0
     last_ok_mv: int = 0
+    last_ok_plugged: bool | None = None  # the phone said a charger was attached
     cut_from_ma: int | None = None  # the reading the cut is judged against
     cut: dict | None = None
     logged: bool = False
@@ -1338,7 +1347,7 @@ class Station:
         self.session = new = self._new_session()
         if self.state == State.COURTESY:
             for name in ("courtesy_used", "power_on_at", "last_ok_at", "last_ok_ma", "last_ok_mv",
-                         "courtesy_max_ma", "courtesy_wh"):
+                         "last_ok_plugged", "courtesy_max_ma", "courtesy_wh", "free_charge"):
                 setattr(new, name, getattr(old, name))
             now = self.wallclock()
             new.timestamps.setdefault(State.COURTESY.value, now)
@@ -1417,17 +1426,64 @@ class Station:
         if now < self.cooldown_until:
             self._say(f"Courtesy available again in {mmss(self.cooldown_until - now)}")
             return False
-        if self.session.courtesy_used:
-            # One courtesy per session ID: start a fresh one.
+        self._start_courtesy(self.cfg.courtesy_seconds)
+        return True
+
+    def free_charge_refusal(self) -> str | None:
+        """Why a free emergency charge (the Wi-Fi portal, main.py) cannot
+        start now, or None. Only with the relay free: never during a paid
+        session, a courtesy or another free charge, nor while a finished
+        session's cut is being confirmed. Whether this device already had
+        its free charge today is the portal's to say (freeminutes.py)."""
+        if self.cfg.free_charge_seconds <= 0:
+            return "charge_off"
+        if self.state == State.CHARGING:
+            return "busy"
+        if self.state == State.COURTESY:
+            return "busy_free" if self.session.free_charge else "busy_courtesy"
+        if self.state == State.FINISHED:
+            return "finishing"
+        if not self.relay.healthy:
+            return "relay"
+        return None
+
+    def free_charge(self) -> bool:
+        """A device's free emergency charge: the courtesy's path for
+        FREE_CHARGE_SECONDS (a payment now carries over into the paid
+        session, as from a courtesy), on the session on screen: its ID and
+        pay QR stay, so whoever is paying them is credited. Granted per
+        device per day by the portal, so it neither waits for nor starts
+        the operator's cooldown."""
+        if self.free_charge_refusal():
+            return False
+        self._start_courtesy(self.cfg.free_charge_seconds, free=True)
+        self._say(f"Free emergency charge: {mmss(self.cfg.free_charge_seconds)}. Pay to keep charging")
+        return True
+
+    def _start_courtesy(self, seconds: int, free: bool = False) -> None:
+        now = self.clock()
+        if self.session.courtesy_used and not free:
+            # One operator courtesy per session ID: start a fresh one. A free
+            # charge never does: it runs on the session on screen, however
+            # many courtesies that session had (the portal's ledger limits
+            # free charges, per device per day). Any phone on the Wi-Fi can
+            # ask for one at any moment, and a new ID would leave a payment
+            # already made to the QR on screen uncredited.
             self._close_unpaid()
             self.ended = (self.session.id, now)
             self.session = self._new_session()
         self.session.courtesy_used = True
+        self.session.free_charge = free
         self._enter(State.COURTESY)
         self._relay_close()
         self.session.power_on_at = now
-        self.courtesy_deadline = now + self.cfg.courtesy_seconds
-        return True
+        self.courtesy_deadline = now + seconds
+
+    def record_free_grant(self, device: str, what: str, seconds: int, simulated: bool = False) -> None:
+        """The session log's only trace of a free grant (main.py's portal): a
+        day's device id, never its MAC, its IP or a name."""
+        self._record({"kind": "free_grant", "device": device, "what": what, "seconds": seconds,
+                      "at": self.wallclock(), **({"simulated": True} if simulated else {})})
 
     def emergency_open(self) -> None:
         """ESC: open the relay, always, whatever the state."""
@@ -1464,7 +1520,8 @@ class Station:
     def _end_courtesy(self) -> None:
         self._relay_open()
         self.courtesy_deadline = None
-        self.cooldown_until = self.clock() + self.cfg.courtesy_cooldown_seconds
+        if not self.session.free_charge:  # a free charge is limited per device per day instead
+            self.cooldown_until = self.clock() + self.cfg.courtesy_cooldown_seconds
         self._enter(State.AWAITING_PAYMENT)
 
     # -- the clock ------------------------------------------------------------
@@ -1476,7 +1533,8 @@ class Station:
         if self.pending:
             self._flush()
 
-        ma, mv, ok = reading
+        ma, mv, ok = reading[:3]
+        plug = plugged(reading) if ok else None
         self.reading = reading
         if ok:
             self.meter_ever_ok = True
@@ -1484,7 +1542,7 @@ class Station:
         s = self.session
         if self.state == State.COURTESY:
             if ok:  # relay closed here too: a payment + ESC right away still has a "before"
-                s.last_ok_at, s.last_ok_ma, s.last_ok_mv = now, ma, mv
+                s.last_ok_at, s.last_ok_ma, s.last_ok_mv, s.last_ok_plugged = now, ma, mv, plug
                 # Measured for the record, kept apart from any paid verdict.
                 s.courtesy_max_ma = max(s.courtesy_max_ma, ma)
                 if ma > 0:
@@ -1500,7 +1558,7 @@ class Station:
                 # The "before" of a cut, and the reading held on screen: never
                 # one taken while a probe had the power off.
                 if s.phase != "checking":
-                    s.last_ok_at, s.last_ok_ma, s.last_ok_mv = now, ma, mv
+                    s.last_ok_at, s.last_ok_ma, s.last_ok_mv, s.last_ok_plugged = now, ma, mv, plug
             else:
                 s.failed_reads += 1
             # With verification, only current this station is verified to be
@@ -1508,7 +1566,7 @@ class Station:
             # Not the reading the countdown has yet to decide on after a probe:
             # it may be another charger's (see _verify_tick).
             if ok and (not verify or s.running):
-                self._measure(ma, mv, dt)
+                self._measure(ma, mv, dt, plug)
             if s.running and s.consumed(now) >= s.budget:
                 full = s.budget >= self.cfg.max_session_minutes * 60
                 self._finish("max_session" if full else "time_up")
@@ -1518,7 +1576,7 @@ class Station:
                 log.info("session %s ends %ss before its deadline on the contract", s.id, CLAIM_WINDOW_SECONDS)
                 self._finish("deadline")
             elif verify:
-                self._verify_tick(now, ma, ok)
+                self._verify_tick(now, ma, ok, plug)
             elif not s.started:
                 waited = now - (s.power_on_at or now)
                 if ok or waited >= self.cfg.adb_wait_timeout:
@@ -1563,10 +1621,12 @@ class Station:
             s.checkpoint = consumed
             self._record({"kind": "consumed", "session": s.id, "consumed_seconds": consumed, "at": self.wallclock()})
 
-    def _measure(self, ma: int, mv: int, dt: float) -> None:
+    def _measure(self, ma: int, mv: int, dt: float, plug: bool | None = None) -> None:
         s = self.session
         s.max_ma = max(s.max_ma, ma)
-        if ma >= self.cfg.min_current_ma and not s.delivering:
+        # A phone on this station's charger is delivered to even when its
+        # battery is net negative under load (see meter.plugged).
+        if (ma >= self.cfg.min_current_ma or plug is True) and not s.delivering:
             s.delivering = True
             log.info("session %s delivering (%d mA)", s.id, ma)
             # Lets an interrupted session still be judged delivered.
@@ -1581,18 +1641,20 @@ class Station:
         """The meter is the phone's own: only a probe tells where current comes from."""
         return self.cfg.meter_source == "phone"
 
-    def _verify_tick(self, now: float, ma: int, ok: bool) -> None:
+    def _verify_tick(self, now: float, ma: int, ok: bool, plug: bool | None = None) -> None:
         s = self.session
         cfg = self.cfg
         if s.phase == "checking":
-            s.probe_reads.append((ma, ok))
+            s.probe_reads.append((ma, ok, plug))
             # The heartbeat ticks about once a second, a few ms early or late:
             # a 3 s probe must not become a 4 s one.
             if now - s.probe_started >= cfg.probe_seconds - TICK_SLACK:
                 self._end_probe(now)
             return
 
-        charging = ok and ma >= cfg.min_current_ma
+        # A charger attached counts as charging even when the battery is net
+        # negative under load; whose charger it is, a probe finds out.
+        charging = ok and (ma >= cfg.min_current_ma or plug is True)
         if charging:
             lows = s.low_reads
             s.low_since, s.low_reads = None, 0
@@ -1725,8 +1787,16 @@ class Station:
         MIN_CURRENT_MA, and one low reading of it is no proof."""
         s, cfg = self.session, self.cfg
         reads = s.probe_reads[1:] or s.probe_reads
-        seen = [ma for ma, ok in reads if ok]
-        if any(ma >= cfg.min_current_ma for ma in seen):
+        seen = [ma for ma, ok, _ in reads if ok]
+        plugs = [p for _, ok, p in reads if ok and p is not None]
+        if plugs:
+            # The phone says whether a charger is attached, and its last word,
+            # once the opening has settled, decides: still attached with this
+            # station's relay open means another charger; gone means this
+            # station's. The battery current is no help under load, and the
+            # phone's gauge lags a relay change by a few seconds anyway.
+            result = "fail" if plugs[-1] else "pass"
+        elif any(ma >= cfg.min_current_ma for ma in seen):
             result = "fail"
         elif len(seen) < len(reads) and cfg.topology != "usb_vbus":
             result = "inconclusive"  # mains: WiFi ADB should have kept reading
@@ -1849,7 +1919,7 @@ class Station:
         fresh = s.last_ok_at is not None and now - s.last_ok_at <= CUT_BASELINE_SECONDS
         if not fresh:
             s.cut = {"confirmed": False, "reason": "phone not readable just before the relay opened"}
-        elif self._cut_by_drop and s.last_ok_ma < self.cfg.min_current_ma:
+        elif self._cut_by_drop and s.last_ok_ma < self.cfg.min_current_ma and not s.last_ok_plugged:
             s.cut = {"confirmed": False,
                      "reason": f"no current before the relay opened ({s.last_ok_ma} mA), nothing to see drop"}
         else:
@@ -1873,8 +1943,11 @@ class Station:
             return
         if not self.relay.is_open:
             return  # the open command failed: power may still be flowing
-        ma, _, ok = reading
-        if self._cut_by_drop and ok and ma < self.cfg.min_current_ma:
+        ma, _, ok = reading[:3]
+        plug = plugged(reading) if ok else None
+        if self._cut_by_drop and ok and plug is False:
+            method = "charger_gone"  # the phone says its charger went away
+        elif self._cut_by_drop and ok and plug is None and ma < self.cfg.min_current_ma:
             method = "current_drop"
         elif not self._cut_by_drop and not ok:
             method = "device_gone"
@@ -1898,7 +1971,7 @@ class Station:
     def verdict(self, s: Session) -> str:
         # With verification, max_ma only counts readings taken while this
         # station was verified to be charging the phone.
-        if s.max_ma >= self.cfg.min_current_ma:
+        if s.max_ma >= self.cfg.min_current_ma or s.delivering:
             return "delivered"
         if s.ok_reads > 0:
             return "no_current"
@@ -1964,6 +2037,8 @@ class Station:
             "courtesy_used": s.courtesy_used,
             "courtesy_max_ma": s.courtesy_max_ma,
             "courtesy_wh": round(s.courtesy_wh, 4),
+            # Only on a session that had one: the record is unchanged otherwise.
+            **({"free_charge": True} if s.free_charge else {}),
             "max_current_ma": s.max_ma,
             "wh": round(s.wh, 4),
             "verdict": self.verdict(s) if s.paid else None,
@@ -1989,13 +2064,14 @@ class Station:
             self._offer_receipt(dict(record), s.seed, served=True)
 
     def _close_unpaid(self) -> None:
-        """A session that only ever had a courtesy. Logged so the host can see
-        how courtesy is being used; there is no money in it."""
+        """A session that only ever had a courtesy (or a free emergency
+        charge). Logged so the host can see how they are being used; there
+        is no money in it."""
         s = self.session
         if s.logged or not s.courtesy_used or s.paid:
             return
         s.logged = True
-        s.end_reason = "courtesy_only"
+        s.end_reason = "free_charge_only" if s.free_charge else "courtesy_only"
         self.closed_ids.add(s.id)
         self._record(self._session_record())
 
@@ -2052,15 +2128,16 @@ class Station:
         charging = self.state == State.CHARGING
         # A probe has the power off for a moment.
         powered = self.state in (State.CHARGING, State.COURTESY) and s.phase != "checking"
-        ma, mv, ok = self.reading
+        ma, mv, ok = self.reading[:3]
         # A failed reading holds the last good one only while power is on in
         # this session: after the relay opens, or in a new session, the old
         # number would be a lie. So it would while waiting or paused: the
         # relay stays closed, but the phone may be gone for minutes.
         held = (not ok and powered and s.last_ok_at is not None
                 and (not charging or s.phase in (None, "running")))
+        plug = plugged(self.reading) if ok else None
         if held:
-            ma, mv = s.last_ok_ma, s.last_ok_mv
+            ma, mv, plug = s.last_ok_ma, s.last_ok_mv, s.last_ok_plugged
 
         if charging:
             remaining = max(0.0, s.budget - s.consumed(now))
@@ -2124,6 +2201,9 @@ class Station:
             "watts": round(ma * mv / 1e6, 2) if (ok or held) and ma > 0 else 0.0,
             "wh": round(s.courtesy_wh if self.state == State.COURTESY else s.wh, 3),
             "held": held,
+            # The phone's own word on a charger being attached (None: this
+            # meter cannot tell): charging even when its battery is net negative.
+            "charger_attached": plug if (ok or held) else None,
             # Not while waiting, checking or paused: the current then is not
             # (or not yet known to be) this station's.
             "delivering": s.delivering and charging and phase in (None, "running"),

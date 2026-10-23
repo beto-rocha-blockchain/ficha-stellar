@@ -10,7 +10,7 @@ here. Paths are from the repository root.
 |---|---|
 | [1. Run it simulated](#1-run-it-simulated-start-here) | no board, no phone, no wallet |
 | [2. Wiring](#2-wiring) | the relay on its NO contact, the two topologies |
-| [3. Offered network](#3-offered-network) | the "Get online" QR |
+| [3. Offered network](#3-offered-network) | the "Get online" QR; [free emergency minutes](#free-emergency-minutes), public safety mode: the settings, on and off |
 | [4. Switching testnet → public](#4-switching-testnet--public) | the checklist |
 | [5. How money flows](#5-how-money-flows) | direct mode, the log, the signed registry |
 | [6. Time counts only while this station charges the phone](#6-time-counts-only-while-this-station-charges-the-phone) | probes, pauses, timeouts |
@@ -59,12 +59,14 @@ station opens the relay for 3 s to check that the current is its own
 | cut power now (emergency), `end_reason` `emergency_stop` | press **ESC** on the station screen |
 | unplug the fake phone mid-session, then plug it back in (the countdown pauses, then a probe resumes it) | press **U** on the station screen while charging (`MOCK=true` only; the header shows it) |
 | offer a network ("Get online" QR) | set `WIFI_SSID` and `WIFI_PASSWORD` in `.env` |
+| free emergency minutes: 2 min of charge and 2 min of internet per phone per day, the emergency numbers (section 3) | open http://127.0.0.1:8000/portal (`WIFI_PORTAL=simulate` in `.env.example`); `?clientmac=02:11:22:33:44:55` plays another phone |
 
 Every closed session and every uncredited payment lands in `sessions.jsonl`.
 
 Smoke test of the whole flow (courtesy, extension, underpaid, orphans, cap,
 ESC, verdicts, both topologies, charge verification, station IDs, registry,
-receipts, refund hints, config checks, custody mode) on a fake clock:
+receipts, refund hints, config checks, custody mode, free emergency minutes
+and the Wi-Fi portal) on a fake clock:
 
 ```bash
 python smoke_test.py
@@ -99,7 +101,12 @@ cannot be written (or whose directory does not exist), a malformed
 `STATION_ID`, an `APP_URL` or `REGISTRY_URL` that is not https, a secret key
 in `REGISTRY_KEY`, a station that differs from its signed registry entry,
 `CHARGE_VERIFY=false` on the public network, `METER_SOURCE=outlet` without
-`MOCK`, and probe or pause timings out of range (section 6).
+`MOCK`, probe or pause timings out of range (section 6), and free emergency
+minutes that cannot work (section 3: free minutes without a portal, a portal
+without `EMERGENCY_NUMBERS`, more than 6 numbers or one that does not end in
+a number, free seconds outside 0 to 3600, a `FREE_RESET` other than
+`midnight`, `WIFI_PORTAL=opennds` on a loopback `HOST` or without
+`WIFI_SSID`).
 
 To receive real **testnet** payments, set `HOST_PUBLIC_KEY` to a testnet
 account you control (create and fund one in Stellar Laboratory) and pay the
@@ -182,7 +189,9 @@ The network must:
 
 - **reach the internet**, or the wallet cannot send the payment;
 - use a **WPA2 password** (or be deliberately open with `nopass`);
-- have **no captive portal**: the phone's wallet has to go straight out;
+- have **no captive portal**: the phone's wallet has to go straight out. The
+  one exception is this station's own (`WIFI_PORTAL=opennds`, below), whose
+  walled garden lets the Ficha app reach Stellar before any sign-in;
 - have **no client isolation**, because the WiFi ADB meter (`mains`) talks to
   the phone across it. The only phone that must be on it is the one being
   measured.
@@ -192,6 +201,84 @@ fine for users paying but useless for the ADB meter. A VPN on the station
 computer that blocks the local network (a kill switch without "allow LAN")
 breaks the meter the same way. In production, the access point is the
 station itself.
+
+### Free emergency minutes
+
+Public safety mode (why, privacy, limits, who can fund it:
+[public-safety.md](public-safety.md)). Where people may need to call or
+message for help, the station's own Wi-Fi (a travel router running OpenWrt
+and openNDS, [`openwrt/`](../openwrt/)) gives every phone, once a day,
+`FREE_CHARGE_SECONDS` of charging and `FREE_INTERNET_SECONDS` of internet,
+free, and shows the `EMERGENCY_NUMBERS` first on the page the Wi-Fi opens
+(the portal, `/portal`) and on the station screen. Paying with Ficha works on
+that Wi-Fi without spending them. No money moves for a free minute. A phone
+is its Wi-Fi MAC address, kept only as a hash whose salt changes every day.
+
+| setting | default | what |
+|---|---|---|
+| `WIFI_PORTAL` | `off` | `off`: no portal, no free minutes, the station exactly as before. `simulate`: no router; the portal on this computer, free internet written down but not given. `opennds`: the router sends each phone that joins to this station's `/portal` |
+| `FREE_CHARGE_SECONDS` | `0` | free charge per phone per day, 0 to 3600 (120 in the demo files): this station's relay, on the courtesy's path |
+| `FREE_INTERNET_SECONDS` | `0` | free internet per phone per day, 0 to 3600 (120 in the demo files): shown and written down here, given and limited by the router. Set the router's `FREE_INTERNET_SECONDS` to the same |
+| `FREE_RESET` | `midnight` | the allowance starts over at local midnight, the only choice (a rolling 24 h would have to link a phone across two daily salts) |
+| `EMERGENCY_NUMBERS` | empty | `label number` pairs separated by `;`, at most 6; required with a portal. `'Emergency 112'` (Portugal, the EU); `'Polícia 190; SAMU 192; Bombeiros 193'` (Brazil) |
+
+With `WIFI_PORTAL=opennds` the station also needs `HOST=0.0.0.0` (or its
+address on the router's network), `WIFI_SSID` with `WIFI_SECURITY` and
+`WIFI_PASSWORD` as the router has them (the screen's join QR), and
+`MOCK_PAYMENT=false` (fake payments are refused off loopback).
+
+**The `.env` examples.** All four (`.env.example`, `.env.lisbon.example`,
+`.env.mains.example`, `.env.usbvbus.example`) turn the mode on, simulated:
+`WIFI_PORTAL=simulate`, 120 and 120 seconds, `EMERGENCY_NUMBERS='Emergency 112'`.
+Each has the Brazil numbers and the router's lines in comments;
+`.env.example` explains every setting. `.env` itself is yours: copy the
+lines you want.
+
+**On, simulated** (no router: a demo, a rehearsal). The settings of the
+examples; start the station and open http://127.0.0.1:8000/portal on the
+station's computer. `?lang=pt` shows it in Portuguese, and
+`?clientmac=02:11:22:33:44:55` plays another phone (from this computer only:
+each phone has one free charge a day, this computer's own included).
+
+**On, with the router** (at the event, about 20 minutes;
+[openwrt/README.md](../openwrt/README.md) has each step and how to check it):
+
+1. The router online, its time zone the local one (its day must be the
+   station's), its VPN, any other portal and IPv6 off.
+2. `setup.sh` on the router with the station computer's MAC address, e.g.
+   `STATION_MAC=a4:5e:60:d1:22:01 SSID='Ficha SOS' WIFI_OPEN=1 sh setup.sh`:
+   openNDS, the walled garden, the once-a-day script, the station's fixed
+   address (`192.168.8.20`), the station trusted (it never sees the portal).
+3. The station computer on the router's network only, at that address, the
+   network marked Private in Windows (any other network off or Public).
+4. In `.env`: `WIFI_PORTAL=opennds`, `HOST=0.0.0.0`, `PORT=8000` (the
+   `PORT` given to setup.sh), `MOCK_PAYMENT=false`, `WIFI_SSID='Ficha SOS'`,
+   `WIFI_SECURITY=nopass`, both seconds settings as the router's, and
+   `EMERGENCY_NUMBERS`. Start the station; allow Python on private networks
+   when Windows asks.
+5. A phone joins `Ficha SOS`: the sign-in page opens with the portal. Pay
+   with Ficha; take the free internet; take it again: refused for today.
+
+**Off.** `WIFI_PORTAL=off` and both seconds settings `0` (free seconds without
+a portal stop the start). On the router, `/etc/init.d/opennds stop` (everyone
+online, no portal) or `sh /tmp/setup.sh --remove` (back to the router's own
+settings).
+
+**What changes on the station while it is on.** The station screen, its
+socket (ESC, C, E) and `/debug` answer only to the station's own computer;
+a phone that opens the station's address gets the portal, so a second screen
+elsewhere on the network is not possible. The screen shows a band with the
+emergency numbers and the free minutes (with SIMULATED and "no internet is
+given" without a router); a free charge reads "free charge" and counts down.
+Each grant is one `free_grant` line in `sessions.jsonl` with the phone's id
+of the day, never its MAC or IP; a session that had a free charge says
+`"free_charge": true` (`end_reason` `free_charge_only` when nobody paid).
+The day's salt and ledger are a file in `CURSOR_DIR`
+(`.free_minutes.<YYYY-MM-DD>.json`), deleted within a minute of the next local
+midnight (by a station that was off then, when it starts).
+
+The portal's query, how a phone is recognised, the network and security
+rules: [free-minutes.md](free-minutes.md).
 
 ## 4. Switching testnet → public
 

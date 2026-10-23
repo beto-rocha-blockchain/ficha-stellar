@@ -16,7 +16,8 @@ start to finish, until it fits in 3:00 with 15 s to spare.
 | Payer's phone | our second phone with the Ficha app (PWA or debug APK) and a wallet holding at least 20 test XLM; or the judge's phone (see below) |
 | Second screen or tab | stellar.expert on the contract `CBRNN2W7…HYI6KYC` and on the payer's account |
 | Card on the table | the app's address, <https://ficha-stellar.vercel.app>, as text and as a QR, and the repository's address |
-| Travel router | its own network for the laptop and the measured phone; uplink the venue's WiFi or a Portuguese SIM |
+| Travel router | its own network for the laptop and the measured phone; uplink the venue's WiFi or a Portuguese SIM. For public safety mode with the router (plan R below), openNDS set up by `openwrt/setup.sh` |
+| Second browser window | the Wi-Fi's page of public safety mode, `http://127.0.0.1:8000/portal`, narrowed to a phone's width, next to the station screen (plan S below) |
 
 ## Before the judges arrive (10 minutes)
 
@@ -60,6 +61,67 @@ of counting. If the FINISHED screen has gone (60 s) before the scan, the
 receipt waits on the station's waiting screen as a `ficha:` link: scan it
 from the app's **Scan QR**, not the phone's camera.
 
+## Public safety mode (1 minute, after the 3)
+
+Ficha's free emergency minutes ([docs/public-safety.md](../public-safety.md)):
+once a day, every phone on the station's Wi-Fi gets 2 minutes of charging
+and 2 minutes of internet, free, with the emergency numbers first. Show it
+after the paid demo, never during it: a free charge is refused while a paid
+session runs or its FINISHED screen is up ("The station is charging a paid
+session.").
+
+**Plan S, simulated (works today, no router).** The station's `.env` from
+`.env.mains.example` already has `WIFI_PORTAL=simulate`, 120 and 120
+seconds and `EMERGENCY_NUMBERS='Emergency 112'`. The free charge closes the
+real relay; the free internet is only written down, and the page and the
+screen say SIMULATED. With the mode on, the station screen and its keys
+answer only to the laptop, which is where both windows are.
+
+| Time | Say | Do | The judges see |
+|---|---|---|---|
+| 0:00 | "Ficha also goes where a dead phone is dangerous: a bus station at night, a remote place, a neighbourhood with a lot of violence." | Point at the band at the bottom of the station screen | The emergency band: 112, and "SIMULATED Free 2 min charge + 2 min internet a day per phone" |
+| 0:10 | "This is the page a phone gets when it joins the station's Wi-Fi. The emergency numbers come first." | Show the second window | 112 as a large call button, **2 min free charge**, **2 min free internet**, **Pay with Ficha**, the safety note |
+| 0:20 | "Two minutes of charge, free, once a day per phone. No account, no payment." | Tap **2 min free charge** | The relay clicks; the station: "free charge", 2:00 counting down; the page: "Free charge on for 2 min." |
+| 0:35 | "Paying needs no mobile data: on this Wi-Fi the Ficha app and Stellar are open before any sign-in, without spending the free minutes." | Point at **Pay with Ficha** | The pay link of the session on the screen |
+| 0:45 | "The internet is the router's job: here it is simulated." | Tap **2 min free internet** | "Internet granted (simulated)…", and the button now "Used today. Again after midnight." |
+| 0:55 | "A phone is only a code that changes every day: no MAC address, no IP, no name. And this is not an emergency service: it puts the number first and keeps a phone alive." | Point at the privacy line; press **E** if the paid demo comes next | The free charge ends early (E), or by itself at 0:00 |
+
+- **A new test phone for each judge.** The laptop's own test phone gets one
+  free charge a day, so open the page as
+  `http://127.0.0.1:8000/portal?clientmac=02:00:00:00:01:01` for the first
+  judge, then `…:01:02`, `…:01:03`. Only the laptop may give a test address.
+- **In Portuguese:** add `lang=pt` (`?lang=pt`, or `&lang=pt` after the
+  test address).
+- **Optional bridge into the paid demo:** have the payer pay while the free
+  charge runs. The payment turns it into the paid session, as after a
+  courtesy minute: the relay stays closed, then the usual probe.
+
+**Plan R, the real router (the event's milestone).** Once steps 1 to 5 of
+[openwrt/README.md](../../openwrt/README.md) pass at the table, switch the
+station to the router between two judges: stop it, set the `.env` lines of
+[operators.md, section 3](../operators.md#free-emergency-minutes)
+(`WIFI_PORTAL=opennds`, `HOST=0.0.0.0`, `WIFI_SSID='Ficha SOS'`,
+`WIFI_SECURITY=nopass`), start it, and check the meter still reads the
+measured phone on the router's Wi-Fi.
+
+1. The judge's phone (or ours), mobile data off, joins `Ficha SOS`. The
+   sign-in page opens by itself, with the same page as plan S, without
+   SIMULATED.
+2. **Pay with Ficha**: open the link in the phone's browser, not in the
+   sign-in window (that window has its own storage, without the wallet).
+   The app loads and pays through the walled garden, with no free minutes
+   spent.
+3. **2 min free internet**: any site opens; after 2 minutes (and at most
+   10 s more) the sign-in page is back. Again: refused for today. On the
+   router, `logread -e ficha-freewifi` shows `free_grant`, then
+   `free_refused … reason=used_today`.
+4. Tell judges before they tap: their phone gets its free minutes once that
+   day.
+
+Write down what passed, in a small dated commit after the
+`pre-hackmeridian` tag: the router running the free minutes at the table is
+the work done at the event.
+
 ## Questions to expect
 
 | Question | Answer, from what is built |
@@ -72,6 +134,10 @@ from the app's **Scan QR**, not the phone's camera.
 | Could another wallet steal the session? | A session is its ID plus the anchor. A deposit with another chain is another session the station ignores. A copy of the exact QR can be paid first; the real payer is stopped before signing, and the copier only pays fees. |
 | Can it run in euros? | Direct mode takes any Stellar asset today. The escrow moves any asset's SAC, but custody stations use XLM only for now: an asset's issuer could freeze a payer or claw back the escrow's balance, so EURC in custody needs an allowlist of issuers first. EURC and a SEPA anchor are on the roadmap; the MiCA framing of an escrow with no admin is still to be checked. |
 | Unit economics? | Not measured yet. The demo prices are testnet placeholders. |
+| Is public safety mode an emergency service? | No. It shows the local emergency numbers first and can keep a phone alive for two minutes; it calls, alerts and tracks nobody. In danger, call 112 directly. |
+| Do you store MAC addresses? | No. The station keeps a hash of the MAC with a salt made for the day; at midnight the salt and the day's file are deleted, so nothing links two days or leads back to a MAC. No IP, no name. |
+| Can someone get more than 2 minutes of internet? | A determined user can: the payment hosts share network addresses with other sites, and a phone can change its MAC address. The 2 minutes are a courtesy for an ordinary phone; the gap costs free internet, never money. |
+| Who pays for the free minutes? | Today the venue: a free charge is a fraction of a cent of electricity (an estimate). Next, a city, an NGO or a sponsor; sponsored fichas on the ledger are on the roadmap, not built. |
 
 ## Fallbacks
 
@@ -106,4 +172,6 @@ phones are attached, start again.
   (`.env.example`: fake payments with `curl -X POST localhost:8000/debug/pay`,
   [docs/operators.md](../operators.md), section 1). A custody station shows
   no pay QR until it has read the contract. Show the recorded run's
-  transactions from offline screenshots.
+  transactions from offline screenshots. Public safety mode's plan S still
+  works, except paying: the page needs nothing from the internet, and the
+  free charge is the station's own relay.

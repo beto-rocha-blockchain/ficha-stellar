@@ -15,21 +15,23 @@ import secrets
 import sys
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
 import escrow
+import freeminutes
 import meter as meter_mod
+import portal
 import qr
 import registry_check
 import relay as relay_mod
 import supervisor
-from session import SessionLog, Station
+from session import SessionLog, State, Station
 from stellar import HorizonWatcher, Payment, format_amount
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
@@ -68,6 +70,15 @@ escrow_watcher = (escrow.EscrowWatcher(cfg, on_event=lambda e: handle_escrow(e),
                   if cfg.custody else None)
 if escrow_watcher:
     station.watch_escrow()
+
+# Free emergency minutes (docs/free-minutes.md): what each device used today,
+# by its id of the day, never its MAC. None with WIFI_PORTAL=off.
+free = freeminutes.FreeMinutes(cfg) if cfg.free_on else None
+# The device whose free charge is the one running (if a free charge runs at
+# all: one at a time), so its portal page counts it down. Its id of the day.
+free_owner: str | None = None
+# How the portal finds a device's MAC: this computer's neighbour (ARP) table.
+neighbour = portal.neighbour_mac
 
 clients: set[WebSocket] = set()
 server: uvicorn.Server | None = None
@@ -128,6 +139,17 @@ def snapshot() -> dict:
         "mock_plug": meter.plug if isinstance(meter, meter_mod.MockMeter) else None,
         "finished_seconds": cfg.finished_seconds,
     })
+    # Free emergency minutes and the numbers to call: only when set, so a
+    # station without them sends exactly what it always did.
+    if cfg.emergency_numbers:
+        snap["emergency"] = [{"label": label, "number": number} for label, number in cfg.emergency_numbers]
+    if cfg.free_on:
+        snap["free"] = {
+            "portal": cfg.wifi_portal,
+            "charge_seconds": cfg.free_charge_seconds,
+            "internet_seconds": cfg.free_internet_seconds,
+            "charging": station.state == State.COURTESY and station.session.free_charge,
+        }
     return snap
 
 
@@ -240,6 +262,25 @@ async def recheck_once() -> None:
     broadcast()
 
 
+# How often the free minutes' day is checked: a running station deletes the
+# old day's salt within this long after local midnight.
+FREE_ROLL_SECONDS = 60.0
+
+
+async def free_days() -> None:
+    """Free minutes: the daily reset also when no phone opens the portal
+    (freeminutes.py otherwise rolls the day only when a device is looked
+    up), so yesterday's salt does not stay on disk next to yesterday's ids.
+    Its own task, on the event loop like the portal: a failure here never
+    touches the heartbeat (the countdown, the relay)."""
+    while True:
+        try:
+            free.rollover()
+        except Exception:
+            log.exception("free minutes: the daily reset failed; trying again in %ss", FREE_ROLL_SECONDS)
+        await asyncio.sleep(FREE_ROLL_SECONDS)
+
+
 async def recheck() -> None:
     """recheck_once() every RECHECK_SECONDS, and at once when the station asks
     (a deposit came under terms that are not its own)."""
@@ -281,6 +322,10 @@ async def lifespan(app: FastAPI):
     else:
         log.info("paid time counts only while this station is verified to charge the phone: "
                  "probe %ss every %ss", cfg.probe_seconds, cfg.probe_every_seconds)
+    if cfg.free_on:
+        log.info("free emergency minutes (WIFI_PORTAL=%s): %ss of charge and %ss of internet per phone per day, "
+                 "reset at local midnight; the station screen and its keys answer only to this computer",
+                 cfg.wifi_portal, cfg.free_charge_seconds, cfg.free_internet_seconds)
     if cfg.custody:
         log.info("custody mode: deposits into %s through %s (read only); refund unit %ss, grace %ss",
                  cfg.escrow_contract, cfg.rpc_url, cfg.refund_unit_seconds, cfg.escrow_grace_seconds)
@@ -293,6 +338,8 @@ async def lifespan(app: FastAPI):
     if escrow_watcher:
         tasks.append(asyncio.create_task(escrow_watcher.run()))
         tasks.append(asyncio.create_task(recheck()))
+    if free is not None:
+        tasks.append(asyncio.create_task(free_days()))
     try:
         yield
     finally:
@@ -308,9 +355,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+def operator_peer(client) -> bool:
+    """With the Wi-Fi portal on, the station listens on the router's network,
+    where every phone on its Wi-Fi is: the station screen, its keys (ESC, C,
+    E) and /debug then answer only to this computer. Portal off: anyone the
+    server answers to, as always."""
+    return not cfg.free_on or portal.is_loopback(client.host if client else None)
+
+
 @app.get("/")
-async def index():
-    return FileResponse(config.BASE_DIR / "static" / "index.html")
+async def index(request: Request):
+    if not operator_peer(request.client):
+        # A phone on the station's Wi-Fi that opens the station's address
+        # gets the portal, never the operator's screen.
+        return RedirectResponse("/portal", status_code=303)
+    # no-store: after an update, a reload must show the new screen, never a
+    # copy the browser kept (FileResponse alone lets it cache by heuristics).
+    return FileResponse(config.BASE_DIR / "static" / "index.html", headers={"Cache-Control": "no-store"})
 
 
 # The screen's fonts and logo come from here, never from a CDN: the station
@@ -356,6 +417,10 @@ async def ws_endpoint(ws: WebSocket):
         log.warning("refused /ws from origin %r, host %r", ws.headers.get("origin"), ws.headers.get("host"))
         await ws.close(code=1008)
         return
+    if not operator_peer(ws.client):
+        log.warning("refused /ws from another device on the network (the Wi-Fi portal is on)")
+        await ws.close(code=1008)
+        return
     await ws.accept()
     clients.add(ws)
     try:
@@ -387,7 +452,7 @@ if cfg.mock_payment:
         # asking first (no CORS preflight), but not an application/json one.
         if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
             raise HTTPException(415, "send the body as application/json")
-        if not same_origin(request.headers):
+        if not same_origin(request.headers) or not operator_peer(request.client):
             raise HTTPException(403, "only the station itself may make debug payments")
         body = await request.json()
         try:
@@ -440,7 +505,7 @@ if cfg.mock_payment:
             names another receipt waiting to be claimed (two take turns)."""
             if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
                 raise HTTPException(415, "send the body as application/json")
-            if not same_origin(request.headers):
+            if not same_origin(request.headers) or not operator_peer(request.client):
                 raise HTTPException(403, "only the station itself may make debug payments")
             body = await request.json()
             how = body.get("how", "proof")
@@ -459,10 +524,199 @@ if cfg.mock_payment:
                     "to_host": e.to_host}
 
 
+# -- the Wi-Fi portal: free emergency minutes (docs/free-minutes.md) ---------------
+if cfg.free_on:
+    def portal_params(params: dict[str, str]) -> dict[str, str]:
+        """What the portal carries to its next page; a test MAC only in a demo."""
+        kept = portal.carried(params)
+        if cfg.wifi_portal != "simulate":
+            kept.pop("clientmac", None)
+        return kept
+
+    async def identify(request: Request, params: dict[str, str]) -> tuple[str | None, str | None]:
+        """(the device's MAC, None), or (None, why not). The MAC lives in
+        memory for this request only: freeminutes.py keeps its hash of the day."""
+        peer = portal.peer_ip(request.client.host if request.client else None)
+        if cfg.wifi_portal == "simulate" and portal.is_loopback(peer):
+            # This computer, in a demo without a router: a test MAC, or its own.
+            if params.get("clientmac"):
+                mac = freeminutes.normalise_mac(params["clientmac"])
+                return (mac, None) if mac else (None, "bad_mac")
+            return portal.SIMULATED_MAC, None
+        if cfg.wifi_portal == "opennds":
+            # Only a phone on the router's LAN. With HOST=0.0.0.0 the station
+            # also answers on any other network this computer is on (a
+            # venue's Wi-Fi, a private network), where its neighbours could
+            # otherwise close the relay without ever joining Ficha's Wi-Fi.
+            # The router's sign-in names its gateway (authaction); the phone
+            # and this computer's address the request came in on must be on
+            # that gateway's /24. Never logged: no address is kept.
+            lan = portal.router_lan(params.get("authaction", ""))
+            if lan is None:
+                return None, "no_gateway"
+            server = request.scope.get("server") or (None,)
+            if not portal.on_lan(lan, peer, server[0]):
+                log.warning("portal: a request from outside the router's LAN refused")
+                return None, "not_lan"
+        claimed = portal.client_ip(params)
+        if claimed and claimed != peer:
+            # The router saw the phone at another address: this station is
+            # not on the router's LAN, and would see the router (or a NAT)
+            # instead of each phone. Never logged: no address is kept.
+            log.warning("portal: a request from another address than the phone's (is the station behind a NAT?)")
+            return None, "not_direct"
+        mac = await asyncio.to_thread(neighbour, peer)
+        return (mac, None) if mac else (None, "unknown_device")
+
+    def portal_pay_link(uri: str) -> str:
+        """The portal's "Pay with Ficha" link to the pay link on the station
+        screen. Direct mode: a web+stellar: link opens only in an app that
+        handles it, so not in a phone's sign-in window, nor on a phone
+        without the Ficha app (whose store is outside the walled garden);
+        with APP_URL, the web app's /pay?uri=<that link> instead, which any
+        browser opens (its host is in the router's walled garden). Custody:
+        the screen's link already is APP_URL/p?..."""
+        if cfg.app_url and uri.startswith("web+stellar:"):
+            return f"{cfg.app_url}/pay?uri={quote(uri, safe='')}"
+        return uri
+
+    def portal_view(params: dict[str, str], lang: str, mac: str | None, message: str | None) -> portal.View:
+        snap = snapshot()
+        state = station.state
+        used = free.used_today(mac) if mac else {"charge": False, "internet": False}
+        yours = (snap["courtesy_seconds_left"] if mac and state == State.COURTESY and station.session.free_charge
+                 and free_owner == free.device_id(mac) else None)
+        # The pay link whenever the station screen shows its pay QR.
+        if state == State.FINISHED:
+            pay_block = "finishing"
+        elif not snap["relay"]["healthy"] or snap["out_of_service"]:
+            pay_block = "oos"
+        elif state == State.CHARGING and not snap["can_add"]:
+            pay_block = "full"
+        else:
+            pay_block = None
+        return portal.View(
+            lang=lang, mode=cfg.wifi_portal, station_name=cfg.station_name, station_id=cfg.station_id,
+            emergency=cfg.emergency_numbers, charge_seconds=cfg.free_charge_seconds,
+            internet_seconds=cfg.free_internet_seconds, device_known=mac is not None,
+            charge_used=used["charge"], internet_used=used["internet"],
+            charge_block=None if yours is not None else station.free_charge_refusal(), charge_yours_left=yours,
+            pay_uri=None if pay_block else portal_pay_link(snap["uri"]), pay_add=state == State.CHARGING,
+            pay_block=pay_block,
+            ficha_minutes=cfg.ficha_minutes, ficha_price=snap["ficha_price"], asset=cfg.asset_label,
+            session_id=snap["session_id"], message=message, carried=portal_params(params))
+
+    @app.get("/portal")
+    async def portal_page(request: Request):
+        """The page openNDS sends a phone to (FAS level 0), or a phone opens."""
+        if not local_host(request.headers.get("host", "").lower()):
+            raise HTTPException(400, "open the portal by the station's address")
+        params = {k: v for k, v in request.query_params.items()}
+        lang = portal.lang_of(params.get("lang"), request.headers.get("accept-language"))
+        mac, why = await identify(request, params)
+        message = params.get("m") if params.get("m") in portal.TEXT["en"]["msg"] else None
+        if why in ("not_direct", "bad_mac", "not_lan", "no_gateway"):
+            message = why
+        return HTMLResponse(portal.page(portal_view(params, lang, mac, message)),
+                            headers={"Cache-Control": "no-store"})
+
+    async def portal_form(request: Request) -> dict[str, str]:
+        """The portal page's form. A page on another site cannot post it: a
+        browser sends that page's Origin, which is not this station."""
+        if request.headers.get("content-type", "").split(";")[0].strip().lower() \
+                != "application/x-www-form-urlencoded":
+            raise HTTPException(415, "send the portal page's form")
+        if not same_origin(request.headers):
+            raise HTTPException(403, "only the station's own portal page may ask for free minutes")
+        declared = request.headers.get("content-length") or "0"
+        if not declared.isdigit() or int(declared) > portal.FORM_MAX_BYTES:
+            raise HTTPException(413, "form too large")
+        body = await request.body()
+        if len(body) > portal.FORM_MAX_BYTES:
+            raise HTTPException(413, "form too large")
+        return portal.parse_form(body)
+
+    def portal_back(params: dict[str, str], code: str) -> RedirectResponse:
+        """Back to the portal page, saying what happened (post, redirect, get:
+        a reload never asks twice)."""
+        return RedirectResponse(portal.portal_url(portal_params(params), m=code), status_code=303)
+
+    @app.post("/portal/charge")
+    async def portal_charge(request: Request):
+        """This device's free emergency charge of the day: the station's relay
+        closes for FREE_CHARGE_SECONDS, as for a courtesy."""
+        global free_owner
+        params = await portal_form(request)
+        mac, why = await identify(request, params)
+        if mac is None:
+            return portal_back(params, why)
+        if cfg.free_charge_seconds <= 0:
+            return portal_back(params, "charge_off")
+        if free.used_today(mac)["charge"]:
+            return portal_back(params, "charge_used")
+        refusal = station.free_charge_refusal()
+        if refusal:
+            return portal_back(params, refusal)
+        try:
+            device, seconds = free.grant(mac, "charge")
+        except freeminutes.Refused as exc:
+            return portal_back(params, f"charge_{exc.code}")
+        except OSError as exc:
+            log.error("free charge not given: the day's file cannot be written (%s)", exc.strerror or exc)
+            return portal_back(params, "record_failed")
+        # Nothing ran since free_charge_refusal(): one event loop, no await.
+        station.free_charge()
+        station.record_free_grant(device, "charge", seconds)
+        free_owner = device
+        broadcast()
+        return portal_back(params, "charge_started")
+
+    @app.post("/portal/internet")
+    async def portal_internet(request: Request):
+        """This device's free internet of the day. opennds: the browser goes on
+        to openNDS's auth URL with its token, and the router opens the
+        internet (its binauth script holds the per-MAC daily quota of the
+        sign-in, whatever the station says; a courtesy limit, not a hard one:
+        openwrt/README.md). simulate: recorded, and said so."""
+        params = await portal_form(request)
+        mac, why = await identify(request, params)
+        if mac is None:
+            return portal_back(params, why)
+        if cfg.free_internet_seconds <= 0:
+            return portal_back(params, "internet_off")
+        target = None
+        if cfg.wifi_portal == "opennds":
+            lang = portal.lang_of(params.get("lang"), request.headers.get("accept-language"))
+            fallback = f"http://{request.headers.get('host')}/portal?m=internet_on&lang={lang}"
+            target = portal.auth_redirect(params, fallback)
+            if target is None:
+                return portal_back(params, "no_gateway")
+        try:
+            device, seconds = free.grant(mac, "internet")
+        except freeminutes.Refused as exc:
+            return portal_back(params, f"internet_{exc.code}")
+        except OSError as exc:
+            log.error("free internet not given: the day's file cannot be written (%s)", exc.strerror or exc)
+            return portal_back(params, "record_failed")
+        simulated = cfg.wifi_portal == "simulate"
+        station.record_free_grant(device, "internet", seconds, simulated=simulated)
+        if simulated:
+            log.info("free internet granted (simulated): %s s for a device on the portal", seconds)
+            station.say(f"Free internet granted (simulated): {portal.duration(seconds)} for a phone on the Wi-Fi")
+            broadcast()
+            return portal_back(params, "internet_simulated")
+        station.say(f"Free internet: {portal.duration(seconds)} for a phone on the Wi-Fi")
+        broadcast()
+        return RedirectResponse(target, status_code=303)
+
+
 def run() -> None:
     global server
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.host, port=cfg.port, log_level="warning"))
     print(f"\n  Ficha station: http://{cfg.host}:{cfg.port}\n")
+    if cfg.free_on:
+        print(f"  Wi-Fi portal ({cfg.wifi_portal}): http://{cfg.host}:{cfg.port}/portal"
+              " (the station screen answers only to this computer)\n")
     server.run()
 
 

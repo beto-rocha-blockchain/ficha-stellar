@@ -286,6 +286,39 @@
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .notice:empty { border-color: transparent; background: none; }
 
+  /* Emergency numbers and the free emergency minutes (EMERGENCY_NUMBERS,
+     WIFI_PORTAL; docs/free-minutes.md): one band over the notice, on every
+     screen, only when set. One line, like the notice and the footer. */
+  .sos { display: none; align-items: baseline; gap: max(14px, 1.6 * var(--u)); min-width: 0; overflow: hidden; white-space: nowrap;
+         margin: 0 var(--pad-x) calc(1 * var(--u)); padding: calc(0.45 * var(--u)) calc(1.4 * var(--u));
+         border: 1px solid rgb(var(--destructive-rgb) / .5); border-radius: var(--radius); background: rgb(var(--destructive-rgb) / .08); }
+  body.sos-on { grid-template-rows: auto 1fr auto auto auto; }
+  body.sos-on .sos { display: flex; }
+  .sos .k { flex-shrink: 0; font-family: var(--font-mono); font-weight: 500; text-transform: uppercase; letter-spacing: 0.14em; color: var(--destructive);
+            font-size: clamp(0.8rem, 1.05 * var(--u), 1.3rem); }
+  .sos .nums { flex-shrink: 0; display: flex; gap: max(12px, 1.5 * var(--u)); font-size: clamp(1.2rem, 2.1 * var(--u), 2.7rem); font-weight: 700; line-height: 1.2; }
+  .sos .nums small { font-size: 0.5em; font-weight: 500; color: var(--muted-foreground); margin-left: 0.35em; }
+  .sos .free { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground);
+               font-size: clamp(0.9rem, 1.3 * var(--u), 1.6rem); }
+  .sos .free b { color: var(--brand-lime); font-weight: 600; }
+  /* WIFI_PORTAL=simulate: no router, so no phone gets any internet. Said
+     first, where the line is never cut off. */
+  .sos .free .sim { font-family: var(--font-mono); font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em;
+                    color: var(--destructive); margin-right: 0.6em; }
+  /* The band takes a line of the screen's height: the QRs give it back, so
+     the price and its note stay on screen. */
+  @media (min-aspect-ratio: 1/1) {
+    body.sos-on.big-qr .qrbox img { width: min(30vw, 31vh); }
+    body.sos-on.two-qr .qrbox img { width: min(16vw, 19vh); }
+    body.sos-on.s-CHARGING .qrbox img { width: min(16vw, 21vh); }
+    body.sos-on .receipt .qrbox img { width: min(22vw, 29vh); }
+  }
+  @media (max-aspect-ratio: 1/1) {
+    body.sos-on.big-qr .qrbox img { width: min(60vw, 30vh); }
+    body.sos-on.two-qr .qrbox img { width: min(40vw, 22vh); }
+    body.sos-on.s-CHARGING .qrbox img { width: min(34vw, 20vh); }
+  }
+
   /* footer: one line, always, for the same reason. Each health item gets the
      width it needs while there is room; a long error (a relay port message,
      say) takes what is left and ends in "…". */
@@ -349,8 +382,8 @@
     </div>
     <div class="live cur">
       <div class="current">
-        <div class="label">current</div>
-        <div class="value num"><span id="ma">0</span><span class="unit">mA</span></div>
+        <div class="label" id="malabel">current</div>
+        <div class="value num"><span id="ma">0</span><span class="unit" id="maunit">mA</span></div>
         <div class="hint" id="mahint"></div>
       </div>
     </div>
@@ -395,7 +428,7 @@
       <figure class="qrcard wifi">
         <figcaption><span class="step">1</span> Get online</figcaption>
         <div class="qrbox"><img id="wifiqr" alt="WiFi QR code"></div>
-        <div class="qrnote">no data plan? join this network first<br><b id="ssid"></b></div>
+        <div class="qrnote"><span id="wifinote">no data plan? join this network first</span><br><b id="ssid"></b></div>
       </figure>
       <figure class="qrcard">
         <figcaption><span class="step">2</span> Pay</figcaption>
@@ -411,6 +444,8 @@
     </figure>
   </aside>
 </main>
+
+<div class="sos" id="sos"><span class="k">emergency</span><span class="nums" id="sosnums"></span><span class="free" id="sosfree"></span></div>
 
 <div class="notice" id="notice"></div>
 
@@ -490,6 +525,45 @@
     n.style.fontSize = Math.max(size / 2, Math.floor(size * room / range.getBoundingClientRect().width)) + "px";
   }
 
+  // 120 -> "2 min", 90 -> "90 s".
+  function dur(s) { return s % 60 === 0 ? s / 60 + " min" : s + " s"; }
+  // The emergency band: the numbers to call, and what the station's Wi-Fi
+  // gives each phone for free once a day. Rebuilt only when it changes.
+  var lastSos = null;
+  function sos(fr, em, wifi) {
+    var sim = !!(fr && fr.portal === "simulate");
+    var key = JSON.stringify([fr && [fr.charge_seconds, fr.internet_seconds, fr.portal], em, wifi && wifi.ssid]);
+    if (key === lastSos) return;
+    lastSos = key;
+    var nums = $("sosnums"), free = $("sosfree");
+    nums.innerHTML = "";
+    free.innerHTML = "";
+    em.forEach(function (e) {
+      var n = document.createElement("span"), l = document.createElement("small");
+      n.textContent = e.number;
+      l.textContent = e.label;
+      n.appendChild(l);
+      nums.appendChild(n);
+    });
+    var parts = [];
+    if (fr && fr.charge_seconds) parts.push(dur(fr.charge_seconds) + " charge");
+    if (fr && fr.internet_seconds) parts.push(dur(fr.internet_seconds) + " internet");
+    if (!parts.length) return;
+    // Simulated (no Wi-Fi router): the screen must not advertise internet
+    // that no phone can get.
+    if (sim) {
+      var s = document.createElement("span");
+      s.className = "sim";
+      s.textContent = "simulated";
+      free.appendChild(s);
+    }
+    var b = document.createElement("b");
+    b.textContent = "Free " + parts.join(" + ");
+    free.appendChild(b);
+    free.appendChild(document.createTextNode(sim ? " a day per phone (no Wi-Fi router here: no internet is given)"
+      : " a day per phone on the Wi-Fi" + (wifi ? " " + wifi.ssid : "")));
+  }
+
   // The big numbers take the height the screen gives them and are set
   // smaller only when a long reading ("12 345 mA") would not fit its column.
   function fit(el) {
@@ -527,6 +601,14 @@
     // The network is offered, never required: its QR sits next to the pay QR
     // while waiting for a payment, and goes away once charging.
     if (d.wifi && (st === "AWAITING_PAYMENT" || st === "COURTESY") && !oos) body.classList.add("two-qr");
+    // Emergency numbers and the free emergency minutes, when the station has
+    // them (docs/free-minutes.md): a band on every screen. A free charge is
+    // the courtesy state, given to a phone by the Wi-Fi portal.
+    var fr = d.free || null, em = d.emergency || [];
+    var freeCharge = st === "COURTESY" && !!(fr && fr.charging);
+    if (fr || em.length) { body.classList.add("sos-on"); sos(fr, em, d.wifi); }
+    $("wifinote").textContent = fr && fr.portal === "opennds" ? "free emergency minutes: join, the sign-in page opens"
+      : "no data plan? join this network first";
     // Paid time counts only while this station is verified to be charging
     // the phone: until then, during a check, and while paused, it stands still.
     var ch = d.charge || {};
@@ -541,7 +623,7 @@
     // A check that did not pass, and current still flowing: the next one.
     var again = ch.reason === "elsewhere" || ch.reason === "unchecked" ? "Checked again " + nextCheck + ". " : "";
     $("state").textContent = ph === "waiting" ? (pending ? "check pending" : "plug in") : ph === "checking" ? "checking"
-      : ph === "paused" ? "paused" : STATE_TEXT[st] || st;
+      : ph === "paused" ? "paused" : freeCharge ? "free charge" : STATE_TEXT[st] || st;
     var title = "", sub = "";
     if (ph === "waiting") {
       title = ch.reason === "elsewhere" ? "This phone is charging from another source"
@@ -569,11 +651,18 @@
     $("stid").textContent = d.station_id ? (d.station_name ? "\u00a0·\u00a0" : "") + d.station_id : "";
     $("sid").textContent = d.session_id;
 
-    // current: the protagonist. Discharge (negative) shows as 0.
+    // current: the protagonist. Discharge (negative) shows as 0. A phone that
+    // says its charger is attached while its battery is net negative (in use
+    // on a weak charger) is charging all the same: the charger shows as ON.
     var ma = d.current_ma;
-    $("ma").textContent = ma === null ? "—" : group(Math.max(0, ma));
+    var busy = d.charger_attached === true && ma !== null && ma < d.min_current_ma && ph !== "checking";
+    $("ma").textContent = ma === null ? "—" : (busy ? "ON" : group(Math.max(0, ma)));
+    $("maunit").textContent = busy ? "" : "mA";
+    $("malabel").textContent = busy ? "charger" : "current";
     var hint = "";
     if (ph === "checking") hint = "relay open for the check";
+    else if (busy && (!ph || ph === "running")) hint = "charging · phone in use, battery " + group(ma) + " mA net";
+    else if (busy && ph) hint = "charger on: " + (pending ? "not checked yet" : "not from this station yet");
     else if (ph && ma !== null && !d.held && ma >= d.min_current_ma)
       hint = "the phone's own reading: " + (pending ? "not checked yet" : "not from this station yet");
     else if (d.waiting_for_device) hint = "waiting for the phone…";
@@ -585,7 +674,7 @@
     $("mahint").textContent = hint;
 
     // time: courtesy left, paid time left, or 00:00
-    if (st === "COURTESY") $("timelabel").textContent = "courtesy left";
+    if (st === "COURTESY") $("timelabel").textContent = freeCharge ? "free charge left" : "courtesy left";
     else if (ph === "waiting") $("timelabel").textContent = "time left · starts when charging here";
     else if (ph === "checking") $("timelabel").textContent = "time left · not counting";
     else if (ph === "paused") $("timelabel").textContent = "time left · paused";
@@ -594,7 +683,7 @@
     $("time").textContent = d.time_text || "--:--";  // absent only from a server older than this page
 
     $("fichas").textContent = d.fichas_left;
-    $("watts").textContent = (d.watts || 0).toFixed(1);
+    $("watts").textContent = busy ? "—" : (d.watts || 0).toFixed(1);
     $("wh").textContent = (d.wh || 0).toFixed(3);
 
     // QR

@@ -17,7 +17,29 @@ from typing import Callable
 
 log = logging.getLogger("ficha.meter")
 
-Reading = tuple[int, int, bool]
+# (mA, mV, ok), or (mA, mV, ok, plugged) when the meter can tell whether the
+# phone has a charger attached (see plugged()).
+Reading = tuple
+
+
+def plugged(reading: Reading) -> bool | None:
+    """Whether the phone says a charger is attached: True or False from the
+    phone's own charging status, None when this meter cannot tell. Under load
+    (screen on, screen recording) a phone on a weak charger can be net
+    negative while it charges, so the battery current alone cannot say."""
+    return reading[3] if len(reading) > 3 else None
+
+
+def charger_attached(status: str) -> bool | None:
+    """The phone's battery status as charger presence: Charging, Full and
+    Not charging (plugged in but holding) mean a charger is attached;
+    Discharging means none; anything else is unknown."""
+    st = status.strip().lower()
+    if st in ("charging", "full", "not charging"):
+        return True
+    if st == "discharging":
+        return False
+    return None
 
 
 class Meter:
@@ -444,17 +466,21 @@ class AdbMeter(Meter):
         return -1 if self._sign_votes < 0 else 1
 
     def _learn_sign(self, raw_ma: float, status: str) -> None:
-        """Positive means charging. Only 'Discharging' is trusted outright: a
-        phone that says 'Charging' can still be net negative under load."""
+        """Positive means charging. Learned only while the phone says
+        'Discharging', when the current must be flowing out: the station
+        starts with the relay open and every probe opens it, so those readings
+        come often. 'Charging' readings never vote: under load (screen on,
+        screen recording) a phone on a weak charger is net negative while it
+        charges, and their votes flipped the sign back and forth. Once the
+        sign is known, a contrary reading counts a third as much, so the few
+        seconds the phone's gauge lags behind a relay change cannot flip it."""
         if self.scale is not None:
             return
-        st = status.strip().lower()
-        if st == "discharging" and abs(raw_ma) >= 20:
-            vote = 3 if raw_ma < 0 else -3
-        elif st == "charging" and abs(raw_ma) >= 300:
-            vote = 1 if raw_ma > 0 else -1
-        else:
+        if status.strip().lower() != "discharging" or abs(raw_ma) < 20:
             return
+        vote = 3 if raw_ma < 0 else -3
+        if self.sign_known() and (vote > 0) != (self._sign_votes > 0):
+            vote //= 3
         before = self._sign()
         self._sign_votes = max(-30, min(30, self._sign_votes + vote))
         if self._sign() != before:
@@ -499,7 +525,7 @@ class AdbMeter(Meter):
         ma = self._normalize(cur, parts[2])
         self.ever_ok = True
         self._set_detail(f"sysfs {self.dir.rsplit('/', 1)[-1]}")
-        return (ma, normalize_mv(volt), True)
+        return (ma, normalize_mv(volt), True, charger_attached(parts[2]))
 
     def _read_dumpsys(self) -> Reading:
         code, out, err = self._shell("dumpsys battery")
@@ -525,7 +551,7 @@ class AdbMeter(Meter):
         ma = self._normalize(cur, status)
         self.ever_ok = True
         self._set_detail("dumpsys")
-        return (ma, normalize_mv(mv) if mv else 0, True)
+        return (ma, normalize_mv(mv) if mv else 0, True, charger_attached(status))
 
     # -- for humans -----------------------------------------------------------
     def describe(self) -> str:

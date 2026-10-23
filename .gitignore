@@ -5,6 +5,8 @@ __pycache__/
 sessions.jsonl
 .horizon_cursor*
 .escrow_cursor*
+# Free emergency minutes: the day's salt and ledger (freeminutes.py)
+.free_minutes*
 # Local tooling and stray files, never published
 .claude/
 abi.txt

@@ -3482,6 +3482,737 @@ def test_screens(tmp: Path) -> None:
     main.station.emergency_open()
 
 
+def test_meter_sign(tmp: Path) -> None:
+    print("ADB meter: the current's sign is learned while discharging and holds under load")
+    from meter import AdbMeter
+
+    def bare_meter() -> AdbMeter:  # the normalization only; no adb behind it
+        m = AdbMeter.__new__(AdbMeter)
+        m.scale, m.unit_ua, m._sign_votes = None, None, 0
+        return m
+
+    m = bare_meter()  # a phone that reports positive while charging
+    for _ in range(3):
+        m._normalize(-500_000, "Discharging")  # the relay open at startup
+    check(m.sign_known() and m._sign() == 1, "relay open at startup: the sign is learned (normal)")
+    loaded = [m._normalize(-400_000, "Charging") for _ in range(60)]
+    check(m._sign() == 1 and loaded[-1] == -400,
+          "a minute of 'Charging' while net negative (screen recording on a weak charger): "
+          "the sign never flips, the reading stays honestly negative")
+    check(m._normalize(700_000, "Charging") == 700, "charging current reads positive")
+    for _ in range(3):
+        m._normalize(600_000, "Discharging")  # the gauge lags a probe by a few seconds
+    check(m._sign() == 1, "a probe's few lagging readings cannot flip a known sign")
+
+    inv = bare_meter()  # a phone that reports negative while charging
+    for _ in range(3):
+        inv._normalize(450_000, "Discharging")
+    check(inv.sign_known() and inv._sign() == -1 and inv._normalize(-700_000, "Charging") == 700,
+          "an inverted phone is learned while discharging, and its charging reads positive")
+
+    cold = bare_meter()  # started while already on a charger: nothing to learn from
+    for _ in range(20):
+        cold._normalize(-800_000, "Charging")
+    check(not cold.sign_known() and cold._sign() == 1,
+          "'Charging' readings alone never calibrate the sign")
+
+
+def test_charger_plugged(tmp: Path) -> None:
+    print("charge verification from the phone's own charger status: net negative under load still charges here")
+
+    def run_until(r: Rig, cond, meter, limit: int = 400) -> int:
+        for n in range(1, limit + 1):
+            r.tick(meter=meter)
+            if cond():
+                return n
+        check(False, f"reached within {limit} ticks")
+        return limit
+
+    # 1. This station's charger, the battery net negative all along (a screen
+    #    recording on a weak cable): the phone says a charger is attached
+    #    exactly while this station's relay is closed.
+    (tmp / "load").mkdir()
+    r = Rig(tmp / "load", charge_verify=True)
+    st = r.st
+    here = lambda: (-300, 3900, True, not r.relay.is_open)
+    r.pay("2")
+    n = run_until(r, lambda: phase(r) == "checking", here)
+    check(n <= 2, "plugged in at -300 mA net with a charger attached: the probe starts at once")
+    run_until(r, lambda: st.session.running, here, limit=r.cfg.probe_seconds + 5)
+    check(st.session.verified and (st.session.probes_passed, st.session.probes_failed) == (1, 0),
+          "the charger went away while the relay was open: verified as this station's")
+    r.tick(60, meter=here)
+    s = r.snap()
+    check(phase(r) == "running" and s["charge"]["consumed_seconds"] >= 59 and s["delivering"],
+          "a minute at -300 mA net: counted, delivering, never paused")
+    gone = lambda: (-900, 3800, True, False)
+    r.tick(r.cfg.pause_grace_seconds + 2, meter=gone)
+    check(phase(r) == "paused", "unplugged (no charger attached): paused after the grace")
+    run_until(r, lambda: st.session.running, here)
+    check(st.session.probes_passed >= 2, "plugged back in here: a probe passes and the countdown runs again")
+    r.tick(10, meter=here)
+    st.end_session()
+    r.tick(3, meter=here)
+    rec = st.snapshot()["last"]
+    cut = st.session.cut or {}
+    check(rec["verdict"] == "delivered" and cut.get("confirmed") and cut.get("method") == "charger_gone",
+          "ended with E: delivered, the cut confirmed by the phone's charger going away")
+
+    # 2. Another charger, also net negative: still attached with the relay
+    #    open, so the probe fails and nothing is consumed.
+    (tmp / "other").mkdir()
+    r = Rig(tmp / "other", charge_verify=True)
+    st = r.st
+    other = lambda: (-300, 3900, True, True)
+    r.pay("1")
+    run_until(r, lambda: phase(r) == "checking", other)
+    r.tick(r.cfg.probe_seconds + 1, meter=other)
+    check(st.session.probes_failed == 1 and not st.session.verified and st.session.consumed(r.clock.t) == 0,
+          "a charger still attached with the relay open: another charger's, the probe fails, nothing consumed")
+
+    # 3. The gauge lagging a probe: current still reads high for the first
+    #    seconds, but the phone already says its charger is gone.
+    (tmp / "lag").mkdir()
+    r = Rig(tmp / "lag", charge_verify=True)
+    st = r.st
+    lag = {"n": 0}
+
+    def lagging():
+        if r.relay.is_open:
+            lag["n"] += 1
+            return (600 if lag["n"] <= 2 else -500, 3900, True, False)
+        lag["n"] = 0
+        return (600, 3900, True, True)
+    r.pay("1")
+    run_until(r, lambda: st.session.running, lagging)
+    check(st.session.probes_passed == 1 and st.session.probes_failed == 0,
+          "a gauge still reading 600 mA in the probe's first seconds: the charger status decides, pass")
+
+    # 4. A meter that cannot tell (3-field readings) keeps the current rules.
+    (tmp / "old").mkdir()
+    r = Rig(tmp / "old", charge_verify=True)
+    st = r.st
+    r.pay("1")
+    r.tick(r.cfg.plug_timeout_seconds + 5, meter=lambda: (-300, 3900, True))
+    check(st.state == State.FINISHED and st.snapshot()["last"]["end_reason"] == "not_plugged",
+          "without a charger status, -300 mA is still 'not charging here': the plug-in time runs out")
+
+
+# -- free emergency minutes and the Wi-Fi portal (docs/free-minutes.md) ------------------
+MAC1, MAC2 = "aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"
+PHONE1, PHONE2, ROUTER = "192.168.8.20", "192.168.8.21", "192.168.8.1"
+STATION_LAN = "192.168.8.10:8030"
+EMERGENCY = (("Emergency", "112"),)
+
+
+def free_rig(tmp: Path, **overrides) -> Rig:
+    return Rig(tmp, **{"wifi_portal": "simulate", "free_charge_seconds": 120, "free_internet_seconds": 120,
+                       "emergency_numbers": EMERGENCY, "cursor_dir": tmp, **overrides})
+
+
+def mac_forms(mac: str) -> list[str]:
+    """Every way a MAC could be written into a file."""
+    bare = mac.replace(":", "")
+    return [mac, mac.upper(), mac.replace(":", "-"), mac.replace(":", "-").upper(), bare, bare.upper()]
+
+
+def files_text(*dirs: Path) -> str:
+    return "\n".join(p.read_text(encoding="utf-8", errors="replace")
+                     for d in dirs for p in d.rglob("*") if p.is_file())
+
+
+def test_free_off(tmp: Path) -> None:
+    print("free emergency minutes: off by default, the station as before")
+    cfg = load_env(MOCK="true", MOCK_PAYMENT="true", HOST_PUBLIC_KEY=HOST)
+    check(cfg.wifi_portal == "off" and cfg.free_charge_seconds == 0 and cfg.free_internet_seconds == 0
+          and cfg.free_reset == "midnight" and cfg.emergency_numbers == () and not cfg.free_on,
+          "defaults: WIFI_PORTAL=off, no free charge, no free internet, no emergency numbers")
+    r = Rig(tmp)
+    st = r.st
+    check(st.free_charge_refusal() == "charge_off" and not st.free_charge() and st.state == State.AWAITING_PAYMENT
+          and r.relay.is_open, "no free charge when off: the relay stays open")
+    check(st.courtesy() and st.state == State.COURTESY and not st.session.free_charge, "C: the courtesy as before")
+    r.tick(60)
+    check(st.state == State.AWAITING_PAYMENT and st.cooldown_until > r.clock.t,
+          "the courtesy still starts the operator's cooldown")
+    check(st.courtesy() is False and "available again" in r.snap()["notice"], "and C waits for it, as before")
+    r.tick(300)
+    st.courtesy()
+    rec = [x for x in r.records() if x["kind"] == "session"][-1]
+    check(rec["end_reason"] == "courtesy_only" and "free_charge" not in rec,
+          "a courtesy-only session is logged exactly as before (no free_charge key)")
+    check(not list(tmp.glob(".free_minutes*")), "no day file, no salt on disk when off")
+
+    main = import_main(tmp, reload=True)
+    snap = main.snapshot()
+    client = TestClient(main.app, base_url="http://127.0.0.1:8000")
+    lan = TestClient(main.app, base_url="http://192.168.0.10:8000", client=("192.168.0.30", 50000))
+    check(main.free is None and "free" not in snap and "emergency" not in snap,
+          "main.py off: no ledger, the screen's state has no free or emergency keys")
+    check(client.get("/portal").status_code == 404 and client.post("/portal/charge").status_code == 404
+          and client.post("/portal/internet").status_code == 404, "off: no /portal, /portal/charge, /portal/internet")
+    check(lan.get("/").status_code == 200 and "<title>Ficha</title>" in lan.get("/").text,
+          "off: the station screen answers any address it always did")
+    html = (Path(__file__).resolve().parent / "static" / "index.html").read_text(encoding="utf-8")
+    check("if (fr || em.length)" in html and 'body.sos-on .sos { display: flex; }' in html
+          and ".sos { display: none;" in html,
+          "the screen's emergency band shows only when the station sends free minutes or numbers")
+
+
+def test_free_config(tmp: Path) -> None:
+    print("free emergency minutes: configuration")
+    base = {"MOCK": "true", "MOCK_PAYMENT": "true", "HOST_PUBLIC_KEY": HOST, "CURSOR_DIR": str(tmp)}
+    cfg = load_env(**{**base, "WIFI_PORTAL": "simulate", "FREE_CHARGE_SECONDS": "120", "FREE_INTERNET_SECONDS": "120",
+                      "EMERGENCY_NUMBERS": "Polícia 190; Ambulância 192, Bombeiros 193"})
+    check(cfg.free_on and cfg.wifi_portal == "simulate" and (cfg.free_charge_seconds, cfg.free_internet_seconds)
+          == (120, 120) and cfg.emergency_numbers == (("Polícia", "190"), ("Ambulância", "192"), ("Bombeiros", "193")),
+          "WIFI_PORTAL=simulate, 120 s each, EMERGENCY_NUMBERS as 'label number' pairs (; or ,)")
+    check(load_env(**{**base, "WIFI_PORTAL": "simulate", "EMERGENCY_NUMBERS": "112"}).emergency_numbers
+          == (("", "112"),), "a bare number is accepted (no label)")
+
+    def refused_env(what: str, **env: str) -> str:
+        try:
+            load_env(**{**base, **env})
+        except config.ConfigError as exc:
+            return str(exc)
+        check(False, f"refused: {what}")
+        return ""
+
+    lan = {"MOCK_PAYMENT": "false", "HOST": "0.0.0.0", "EMERGENCY_NUMBERS": "Emergency 112"}
+    cases = [
+        ("free minutes with WIFI_PORTAL=off (a device is known only through the portal)",
+         {"FREE_CHARGE_SECONDS": "120"}, "WIFI_PORTAL"),
+        ("negative free seconds", {"WIFI_PORTAL": "simulate", "EMERGENCY_NUMBERS": "112",
+                                   "FREE_CHARGE_SECONDS": "-1"}, "FREE_CHARGE_SECONDS"),
+        ("more than an hour a day", {"WIFI_PORTAL": "simulate", "EMERGENCY_NUMBERS": "112",
+                                     "FREE_INTERNET_SECONDS": "3601"}, "FREE_INTERNET_SECONDS"),
+        ("an unknown WIFI_PORTAL", {"WIFI_PORTAL": "captive"}, "WIFI_PORTAL"),
+        ("FREE_RESET=rolling (it would link a phone across two salts)", {"FREE_RESET": "rolling"}, "salt"),
+        ("an unknown FREE_RESET", {"FREE_RESET": "noon"}, "FREE_RESET"),
+        ("a portal without EMERGENCY_NUMBERS", {"WIFI_PORTAL": "simulate"}, "EMERGENCY_NUMBERS"),
+        ("an entry with no number", {"WIFI_PORTAL": "simulate", "EMERGENCY_NUMBERS": "Emergency"}, "label number"),
+        ("an entry with letters in the number", {"EMERGENCY_NUMBERS": "Police 19O"}, "label number"),
+        ("seven numbers", {"EMERGENCY_NUMBERS": "; ".join(f"N{i} 11{i}" for i in range(7))}, "at most 6"),
+        ("a label over 32 characters", {"EMERGENCY_NUMBERS": "x" * 33 + " 112"}, "32"),
+        ("opennds on a loopback HOST (phones could not reach the portal)",
+         {"WIFI_PORTAL": "opennds", "EMERGENCY_NUMBERS": "112"}, "HOST"),
+        ("opennds without WIFI_SSID (the join QR)", {"WIFI_PORTAL": "opennds", **lan}, "WIFI_SSID"),
+        ("opennds with MOCK_PAYMENT (free payments from the Wi-Fi)",
+         {"WIFI_PORTAL": "opennds", **lan, "MOCK_PAYMENT": "true", "WIFI_SSID": "Ficha", "WIFI_SECURITY": "nopass"},
+         "MOCK_PAYMENT"),
+    ]
+    for what, env, says in cases:
+        msg = refused_env(what, **env)
+        if says not in msg:
+            check(False, f"refusing {what}, the message names {says!r}: {msg}")
+    check(True, f"{len(cases)} nonsense settings refused, each saying what to change")
+    cfg = load_env(**{**base, **lan, "WIFI_PORTAL": "opennds", "WIFI_SSID": "Ficha SOS", "WIFI_SECURITY": "nopass",
+                      "FREE_CHARGE_SECONDS": "120", "FREE_INTERNET_SECONDS": "120"})
+    check(cfg.wifi_portal == "opennds" and cfg.host == "0.0.0.0", "opennds on 0.0.0.0 with WIFI_SSID: accepted")
+
+    from dotenv import dotenv_values
+    root = Path(__file__).resolve().parent
+    examples = {name: dotenv_values(root / name) for name in
+                (".env.example", ".env.lisbon.example", ".env.mains.example", ".env.usbvbus.example")}
+    check(all(e.get("WIFI_PORTAL") == "simulate" and e.get("FREE_CHARGE_SECONDS") == "120"
+              and e.get("FREE_INTERNET_SECONDS") == "120" and e.get("EMERGENCY_NUMBERS") == "Emergency 112"
+              for e in examples.values()),
+          "the demo .env examples turn it on: simulate, 2 min + 2 min, Lisbon's 112")
+    text = (root / ".env.example").read_text(encoding="utf-8")
+    check("# EMERGENCY_NUMBERS='Polícia 190; SAMU 192; Bombeiros 193'" in text and "FREE_RESET=midnight" in text
+          and "WIFI_PORTAL=opennds" in text, ".env.example: a commented Brazil example, the reset, the router mode")
+
+
+def test_free_ledger(tmp: Path) -> None:
+    print("free emergency minutes: the daily salt, the ledger, no MAC on disk")
+    from freeminutes import FreeMinutes, Refused, local_day, normalise_mac
+    check(normalise_mac("AA-BB-CC-DD-EE-01") == MAC1 == normalise_mac("aabb.ccdd.ee01") == normalise_mac(MAC1.upper()),
+          "a MAC in any notation is one device")
+    check(all(normalise_mac(m) is None for m in ("00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff", "01:00:5e:00:00:01",
+                                                 "aa:bb:cc:dd:ee", "zz:bb:cc:dd:ee:01", "", "aa:bb:cc:dd:ee:01:02")),
+          "zero, broadcast, multicast and malformed addresses are no device")
+    cfg = free_rig(tmp).cfg
+    now = {"t": float(EPOCH)}
+    salts = iter(bytes([i]) * 32 for i in range(1, 10))
+    fm = FreeMinutes(cfg, clock=lambda: now["t"], salt_factory=lambda: next(salts))
+    day1 = local_day(now["t"])
+    id1 = fm.device_id(MAC1)
+    check(re.fullmatch(r"[0-9a-f]{16}", id1) and id1 == fm.device_id(MAC1) and id1 != fm.device_id(MAC2),
+          "a device's id of the day: 16 hex digits, the same all day, one per device")
+    check(fm.grant(MAC1, "charge") == (id1, 120) and fm.used_today(MAC1) == {"charge": True, "internet": False},
+          "the free charge granted: all 120 s at once")
+    try:
+        fm.grant(MAC1, "charge")
+        check(False, "a second free charge the same day is refused")
+    except Refused as exc:
+        check(exc.code == "used", "a second free charge the same day: refused (used)")
+    check(fm.grant(MAC1, "internet") == (id1, 120) and fm.grant(MAC2, "charge")[1] == 120,
+          "the free internet is its own allowance; another device has its own")
+    again = FreeMinutes(cfg, clock=lambda: now["t"], salt_factory=lambda: next(salts))
+    check(again.used_today(MAC1) == {"charge": True, "internet": True} and again.device_id(MAC1) == id1,
+          "a restart the same day: the same salt, nothing granted twice")
+    path1 = fm.path()
+    check(path1.exists() and path1.name == f".free_minutes.{day1}.json", "one file per day in CURSOR_DIR")
+
+    now["t"] += 86_400
+    id2 = again.device_id(MAC1)
+    day2 = local_day(now["t"])
+    files = sorted(p.name for p in tmp.glob(".free_minutes*"))
+    check(id2 != id1 and files == [f".free_minutes.{day2}.json"],
+          "the next day: a new salt, a new id for the same phone; the old day's file (its salt) deleted")
+    check((bytes([1]) * 32).hex() not in files_text(tmp) and id1 not in files_text(tmp),
+          "no file keeps yesterday's salt or ids: yesterday's ids can no longer be traced to a MAC, or linked to today's")
+    check(again.used_today(MAC1) == {"charge": False, "internet": False} and again.grant(MAC1, "charge")[1] == 120,
+          "the allowance starts over at the reset (local midnight)")
+    text = files_text(tmp)
+    check(not any(form in text for m in (MAC1, MAC2) for form in mac_forms(m)),
+          "no raw MAC in any file, in any notation")
+
+    broken = tmp / "broken"
+    broken.mkdir()
+    (broken / f".free_minutes.{day2}.json").write_text("{not json", encoding="utf-8")
+    fm3 = FreeMinutes(replace(cfg, cursor_dir=broken), clock=lambda: now["t"])
+    check(fm3.used_today(MAC1)["charge"] is False and json.loads(fm3.path().read_text())["day"] == day2,
+          "an unreadable day file: the day starts over with a new salt (at most one more free grant)")
+    save = fm3._save
+
+    def full(used):
+        raise OSError(28, "No space left on device")
+    fm3._save = full
+    try:
+        fm3.grant(MAC1, "charge")
+        check(False, "a grant that cannot be written is refused")
+    except OSError:
+        check(fm3.used_today(MAC1)["charge"] is False, "a grant that cannot be written: OSError, nothing given")
+    fm3._save = save
+
+
+def test_free_charge(tmp: Path) -> None:
+    print("free emergency minutes: the free charge on the station (the courtesy's path)")
+    r = free_rig(tmp)
+    st = r.st
+    check(st.free_charge_refusal() is None and st.free_charge(), "a free charge starts with the relay free")
+    check(st.state == State.COURTESY and not r.relay.is_open and st.session.free_charge and st.session.courtesy_used
+          and r.snap()["courtesy_seconds_left"] == 120 and "Free emergency charge" in r.snap()["notice"],
+          "COURTESY with the relay closed for FREE_CHARGE_SECONDS (120), said on screen")
+    check(st.free_charge_refusal() == "busy_free" and not st.free_charge(), "a second free charge meanwhile: refused")
+    r.tick(120)
+    check(st.state == State.AWAITING_PAYMENT and r.relay.is_open and st.cooldown_until == 0.0,
+          "after 2 min the relay opens; no operator cooldown started")
+    check(st.courtesy() and not st.session.free_charge, "C right after a free charge: the operator's courtesy")
+    rec = [x for x in r.records() if x["kind"] == "session"][-1]
+    check(rec["end_reason"] == "free_charge_only" and rec["free_charge"] is True and rec["courtesy_used"] is True,
+          "the unpaid free-charge session logged as free_charge_only, no money in it")
+    check(st.free_charge_refusal() == "busy_courtesy", "no free charge during the operator's courtesy")
+    st.end_session()
+
+    r.pay("1")
+    check(st.state == State.CHARGING and st.free_charge_refusal() == "busy" and not st.free_charge()
+          and not r.relay.is_open and st.session.paid, "never during a paid session: refused, the paid session untouched")
+    st.emergency_open()
+    check(st.free_charge_refusal() == "finishing", "nor while a finished session's cut is confirmed")
+    r.tick(r.cfg.finished_seconds + 1)
+
+    check(st.free_charge(), "a new free charge on the next session")
+    r.tick(30)
+    r.pay("2")
+    s = r.snap()
+    check(st.state == State.CHARGING and s["remaining_seconds"] == 600 and st.courtesy_deadline is None
+          and not r.relay.is_open, "a payment during a free charge carries over: 2 fichas = 10:00, the free time dropped")
+    r.tick(600)
+    r.tick(r.cfg.finished_seconds + 1)
+    rec = [x for x in r.records() if x["kind"] == "session"][-1]
+    check(rec["fichas"] == 2 and rec["free_charge"] is True and rec["verdict"] == "delivered",
+          "the paid session's record says it began as a free charge")
+
+    r.relay.error = "write timeout"
+    check(st.free_charge_refusal() == "relay" and not st.free_charge(), "no free charge while the relay does not answer")
+    r.relay.error = None
+    st.record_free_grant("0123456789abcdef", "internet", 120)
+    line = r.records()[-1]
+    check(line["kind"] == "free_grant" and set(line) == {"kind", "device", "what", "seconds", "at"},
+          "the log's free_grant line: kind, the day's device id, what, seconds, when; nothing else")
+
+
+def test_free_charge_payer(tmp: Path) -> None:
+    print("free emergency minutes: a free charge never takes the session someone is paying")
+    r = free_rig(tmp)
+    st = r.st
+    check(st.free_charge(), "(device A's free charge)")
+    r.tick(125)
+    sid = st.session.id
+    check(st.state == State.AWAITING_PAYMENT and st.session.courtesy_used and r.snap()["session_id"] == sid,
+          "A's free charge ran out unpaid: its session and pay QR stay on screen")
+    # Payer P scans that QR and approves in the app; meanwhile device B taps
+    # "2 min free charge" on the portal.
+    check(st.free_charge() and st.session.id == sid and st.state == State.COURTESY and r.snap()["session_id"] == sid,
+          "B's free charge runs on the session on screen: the same ID, the same pay QR")
+    r.tick(5)
+    r.pay("1", memo=sid)
+    check(st.state == State.CHARGING and st.session.id == sid and st.session.fichas == 1 and not r.relay.is_open
+          and "not credited" not in (r.snap()["notice"] or ""),
+          "P's payment to that QR is credited and carries over into the paid session")
+    check(not [x for x in r.records() if x["kind"] in ("orphan", "refused")],
+          "nothing logged as orphan or refused: no refund to make")
+    st.end_session()
+    r.tick(r.cfg.finished_seconds + 1)
+    recs = [x for x in r.records() if x["kind"] == "session" and x["id"] == sid]
+    check(len(recs) == 1 and recs[0]["fichas"] == 1 and recs[0]["free_charge"] is True,
+          "one record for the session: paid, and begun as a free charge")
+
+    # The same when B's free charge has already ended before the payment lands.
+    sid2 = st.session.id
+    check(st.free_charge() and r.tick(125) is None and st.free_charge() and st.session.id == sid2,
+          "two free charges in a row (two devices): still the session on screen")
+    r.tick(125)
+    r.pay("1", memo=sid2)
+    check(st.state == State.CHARGING and st.session.id == sid2 and st.session.fichas == 1,
+          "a payment after both ended: credited to that session as usual")
+    st.end_session()
+    r.tick(r.cfg.finished_seconds + 1)
+
+    # The operator's C key after a courtesy still opens a new session ID (as before).
+    sid3 = st.session.id
+    check(st.free_charge() and r.tick(125) is None and st.courtesy() and st.session.id != sid3,
+          "C after a free charge: the operator's courtesy on a new session, as before")
+    st.end_session()
+
+    c = custody_rig(tmp / "custody", **{"wifi_portal": "simulate", "free_charge_seconds": 120,
+                                        "free_internet_seconds": 120, "emergency_numbers": EMERGENCY})
+    cs = c.st
+    cs.on_ledger(int(c.unix()))
+    check(cs.free_charge() and c.tick(125) is None, "(custody: A's free charge ran out)")
+    csid = cs.session.id
+    check(cs.free_charge() and cs.session.id == csid, "custody: B's free charge keeps the session and its pay link")
+    deposit(c, 1)
+    check(cs.state == State.CHARGING and cs.session.id == csid and cs.session.fichas == 1
+          and not [x for x in c.records() if x["kind"] in ("orphan", "refused")],
+          "custody: the deposit to the pay link on screen is credited, not refunded as 'session not served'")
+
+
+def portal_client(main, peer: str, host: str = STATION_LAN) -> TestClient:
+    return TestClient(main.app, base_url=f"http://{host}", client=(peer, 40000), follow_redirects=False)
+
+
+def opennds_query(tok: str = "a1b2c3d4", ip: str = PHONE1) -> str:
+    """The FAS level 0 query exactly as openNDS builds it (construct_querystring
+    and encode_and_redirect_to_splashpage): clientip lands inside authaction."""
+    return (f"/portal?authaction=http://{ROUTER}:2050/opennds_auth/?clientip={ip}&gatewayname=Ficha%20SOS"
+            f"&tok={tok}&redir=http%3A%2F%2Fconnectivitycheck.gstatic.com%2Fgenerate_204")
+
+
+def hidden(html_text: str) -> dict[str, str]:
+    import html as html_mod
+    return {k: html_mod.unescape(v) for k, v in
+            re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', html_text)}
+
+
+def post_form(c: TestClient, path: str, form: dict[str, str], origin: str | None = None):
+    from urllib.parse import urlencode as enc
+    headers = {"content-type": "application/x-www-form-urlencoded"}
+    if origin is not False:
+        headers["origin"] = origin or str(c.base_url).rstrip("/")
+    return c.post(path, content=enc(form), headers=headers)
+
+
+def test_portal(tmp: Path) -> None:
+    import portal as portal_mod
+    print("free emergency minutes: the Wi-Fi portal with openNDS (main.py)")
+    env = {"WIFI_PORTAL": "opennds", "HOST": "0.0.0.0", "MOCK_PAYMENT": "false", "WIFI_SSID": "Ficha SOS",
+           "WIFI_SECURITY": "nopass", "FREE_CHARGE_SECONDS": "120", "FREE_INTERNET_SECONDS": "120",
+           "EMERGENCY_NUMBERS": "Emergency 112; Police 190"}
+    main = import_main(tmp, env, reload=True)
+    macs = {PHONE1: MAC1, PHONE2: MAC2}
+    main.neighbour = lambda ip: macs.get(ip)
+    st = main.station
+    phone, phone2 = portal_client(main, PHONE1), portal_client(main, PHONE2)
+
+    page = phone.get(opennds_query())
+    text = page.text
+    check(page.status_code == 200 and page.headers["cache-control"] == "no-store"
+          and text.index('href="tel:112"') < text.index('href="tel:190"') < text.index("Free emergency minutes")
+          < text.index("Pay with Ficha") < text.index("Stay safe"),
+          "GET /portal (openNDS FAS level 0): the emergency numbers first, as tel: links, then the free minutes, "
+          "the pay link, the safety note")
+    form = hidden(text)
+    check(form.get("tok") == "a1b2c3d4" and form.get("authaction") == f"http://{ROUTER}:2050/opennds_auth/?clientip={PHONE1}"
+          and form.get("redir") == "http://connectivitycheck.gstatic.com/generate_204" and "clientmac" not in form,
+          "the page's forms carry the router's token, auth URL (with clientip inside) and redir, never a MAC")
+    import html as html_mod
+    check(html_mod.escape(main.snapshot()["uri"], quote=True) in text and "web+stellar:pay?" in text
+          and "1 ficha = 5 min = 1 XLM" in text, "the pay link of the session on the station screen, with the price")
+
+    # Zero CDN, no script, offline: everything it loads comes from this station.
+    loads = re.findall(r"""<(?:img|script|link|iframe|source)\b[^>]*\b(?:src|href)=["']([^"']*)""", text)
+    loads += re.findall(r"""url\(["']?([^"')]*)""", text)
+    local = [u for u in loads if u.startswith("/static/")]
+    check(loads and all(u.startswith(("/static/", "data:")) for u in loads) and "<script" not in text
+          and "@import" not in text and all(phone.get(u).status_code == 200 for u in local),
+          f"the portal loads nothing from another host and runs no script: {len(local)} files, all from /static")
+    anchors = re.findall(r'<a\b[^>]*href="([^"]*)"', text)
+    check(all(a.startswith(("tel:", "/portal", "web+stellar:")) for a in anchors),
+          "its links: tel: numbers, the portal itself (language), the pay link")
+    import socket as socket_mod
+    connect, getaddrinfo = socket_mod.socket.connect, socket_mod.getaddrinfo
+
+    def no_network(sock, address):
+        # This process's own loopback pipes still work; nothing else does.
+        if isinstance(address, tuple) and address[0] in ("127.0.0.1", "::1"):
+            return connect(sock, address)
+        raise OSError("no internet at all")
+
+    def no_dns(host, *a, **k):
+        if host in ("127.0.0.1", "::1", "localhost", None):
+            return getaddrinfo(host, *a, **k)
+        raise OSError("no internet at all")
+    socket_mod.socket.connect, socket_mod.getaddrinfo = no_network, no_dns
+    try:
+        offline = phone.get(opennds_query())
+    finally:
+        socket_mod.socket.connect, socket_mod.getaddrinfo = connect, getaddrinfo
+    check(offline.status_code == 200 and 'href="tel:112"' in offline.text, "the portal works with no internet at all")
+    pt = phone.get(opennds_query(), headers={"accept-language": "pt-BR,pt;q=0.9,en;q=0.8"})
+    check("Emergência" in pt.text and "Pagar com Ficha" in pt.text and 'lang="pt"' in pt.text
+          and "Emergency" in phone.get(opennds_query() + "&lang=en").text,
+          "Portuguese for a phone that asks for it (or ?lang=pt), English otherwise")
+
+    # Free internet: once per device per day, then openNDS's own auth URL.
+    resp = post_form(phone, "/portal/internet", form)
+    check(resp.status_code == 303 and resp.headers["location"]
+          == f"http://{ROUTER}:2050/opennds_auth/?tok=a1b2c3d4&redir=http%3A%2F%2Fconnectivitycheck.gstatic.com%2Fgenerate_204",
+          "free internet: 303 to authaction?tok=..&redir=.. (openNDS FAS level 0's way back), no other parameter")
+    grant = [x for x in main.station.log.read() if x["kind"] == "free_grant"][-1]
+    check(grant["what"] == "internet" and grant["seconds"] == 120 and grant["device"] == main.free.device_id(MAC1)
+          and "simulated" not in grant, "logged as a free_grant: the day's device id, internet, 120 s")
+    resp = post_form(phone, "/portal/internet", form)
+    check(resp.status_code == 303 and resp.headers["location"].startswith("/portal?")
+          and "m=internet_used" in resp.headers["location"] and "tok=a1b2c3d4" in resp.headers["location"],
+          "the same phone again: back to the portal, 'already had its free internet today'")
+    check("already had its free internet today" in phone.get(resp.headers["location"]).text,
+          "the portal says so, clearly")
+    form2 = hidden(phone2.get(opennds_query(tok="e5f6a7b8", ip=PHONE2)).text)
+    for bad in ("https://evil.example/opennds_auth/", "http://evil.example/opennds_auth/",
+                "http://8.8.8.8:2050/opennds_auth/", f"http://{ROUTER}:2050/a/b/"):
+        resp = post_form(phone2, "/portal/internet", dict(form2, authaction=bad))
+        if "m=no_gateway" not in resp.headers["location"] or main.free.used_today(MAC2)["internet"]:
+            check(False, f"authaction {bad} refused, nothing used")
+    check(True, "an auth URL that is not a private-address openNDS gateway: refused (no open redirect), nothing used")
+    check("m=no_gateway" in post_form(phone2, "/portal/internet", dict(form2, tok="")).headers["location"]
+          and not main.free.used_today(MAC2)["internet"], "no token (not from the router's sign-in): refused")
+    check(post_form(phone2, "/portal/internet", form2, origin="https://evil.example").status_code == 403
+          and phone2.post("/portal/internet", content="tok=a", headers={"content-type": "text/plain"}).status_code == 415
+          and not main.free.used_today(MAC2)["internet"],
+          "a form posted by another site, or not a form: refused, nothing used")
+    big = phone2.post("/portal/internet", content="tok=" + "a" * portal_mod.FORM_MAX_BYTES,
+                      headers={"content-type": "application/x-www-form-urlencoded", "origin": f"http://{STATION_LAN}"})
+    check(big.status_code == 413 and not main.free.used_today(MAC2)["internet"], "an oversized form: 413, nothing used")
+    resp = post_form(phone2, "/portal/internet", form2)
+    check(resp.headers["location"].startswith(f"http://{ROUTER}:2050/opennds_auth/?tok=e5f6a7b8&redir="),
+          "phone 2's own sign-in: its own token, its own free internet")
+
+    # Free charge: once per device per day, never during a paid session.
+    resp = post_form(phone, "/portal/charge", form)
+    check(resp.status_code == 303 and "m=charge_started" in resp.headers["location"]
+          and st.state == State.COURTESY and st.session.free_charge and not st.relay.is_open,
+          "free charge: the station's relay closes for 2 min (COURTESY, a free charge)")
+    snap = main.snapshot()
+    check(snap["free"] == {"portal": "opennds", "charge_seconds": 120, "internet_seconds": 120, "charging": True}
+          and snap["emergency"] == [{"label": "Emergency", "number": "112"}, {"label": "Police", "number": "190"}],
+          "the screen's state: the free minutes (a free charge running) and the emergency numbers")
+    mine = phone.get(resp.headers["location"]).text
+    check("Your free charge:" in mine and 'http-equiv="refresh"' in mine and "Free charge on for 2 min" in mine,
+          "this phone's page counts its free charge down (a reload every 15 s, no script)")
+    check("m=busy_free" in post_form(phone2, "/portal/charge", hidden(phone2.get(opennds_query(ip=PHONE2)).text))
+          .headers["location"] and not main.free.used_today(MAC2)["charge"],
+          "another phone meanwhile: 'the station is giving a free charge right now', nothing used")
+    st.on_payment(Payment("tx-free", "op", "GPAYER", Decimal("1"), "XLM", st.session.id, "", "horizon"))
+    check(st.state == State.CHARGING and st.session.paid and st.session.free_charge,
+          "a payment during the free charge carries over into the paid session")
+    check("Add time to the session now charging" in phone2.get(opennds_query(ip=PHONE2)).text,
+          "while a paid session charges, the portal's pay link adds time to it, and says so")
+    resp = post_form(phone2, "/portal/charge", hidden(phone2.get(opennds_query(ip=PHONE2)).text))
+    check(re.search(r"[?&]m=busy(&|$)", resp.headers["location"]) and st.state == State.CHARGING
+          and not main.free.used_today(MAC2)["charge"],
+          "a free charge asked for during a paid session: refused, the paid session untouched, nothing used")
+    st.emergency_open()
+    st.session.finished_at -= 3600
+    st.tick((0, 0, False))
+    check(st.state == State.AWAITING_PAYMENT, "(the paid session closed)")
+    resp = post_form(phone, "/portal/charge", form)
+    check("m=charge_used" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT,
+          "the same phone the same day: 'already had its free charge today'")
+    resp = post_form(phone2, "/portal/charge", hidden(phone2.get(opennds_query(ip=PHONE2)).text))
+    check("m=charge_started" in resp.headers["location"] and st.state == State.COURTESY,
+          "another phone: its own free charge")
+    st.end_session()
+
+    unknown = portal_client(main, "192.168.8.30")
+    resp = post_form(unknown, "/portal/charge", hidden(unknown.get(opennds_query(ip="192.168.8.30")).text))
+    check("m=unknown_device" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT,
+          "a phone not in the station's neighbour table: refused, 'join the station's Wi-Fi'")
+    natted = portal_client(main, ROUTER)
+    resp = post_form(natted, "/portal/charge", form)
+    check("m=not_direct" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT,
+          "a request from another address than the phone's (a station behind NAT): refused, never the router's MAC")
+
+    # HOST=0.0.0.0: the station also answers on any other network this
+    # computer is on (a venue's Wi-Fi at 10.0.0.x, the station there at .7).
+    # A neighbour there (it has an ARP entry) never joined Ficha's Wi-Fi.
+    stranger, stranger_mac = "10.0.0.55", "aa:bb:cc:dd:ee:55"
+    macs[stranger] = stranger_mac
+    venue = portal_client(main, stranger, host="10.0.0.7:8030")
+    resp = post_form(venue, "/portal/charge", {})
+    check("m=no_gateway" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT and st.relay.is_open
+          and not main.free.used_today(stranger_mac)["charge"],
+          "another network, the portal opened by the station's address there: no free charge (no router sign-in)")
+    copied = hidden(venue.get(opennds_query(ip=stranger)).text)
+    resp = post_form(venue, "/portal/charge", copied)
+    check("m=not_lan" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT and st.relay.is_open
+          and not main.free.used_today(stranger_mac)["charge"],
+          "the same with the router's sign-in parameters copied in: refused, not on the router's LAN, relay open")
+    resp = post_form(venue, "/portal/internet", copied)
+    check("m=not_lan" in resp.headers["location"] and not main.free.used_today(stranger_mac)["internet"],
+          "and no free internet recorded for it either")
+    check("This phone is not on the station&#x27;s Wi-Fi" in venue.get(opennds_query(ip=stranger)).text,
+          "its page says to join the station's Wi-Fi")
+    wrong_way = portal_client(main, PHONE2, host="10.0.0.7:8030")
+    resp = post_form(wrong_way, "/portal/charge", hidden(wrong_way.get(opennds_query(ip=PHONE2)).text))
+    check("m=not_lan" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT,
+          "a request that came in on the station's address on another network: refused too")
+    check("from the station&#x27;s Wi-Fi sign-in page to get the free minutes" in phone.get("/portal").text,
+          "a phone on the Wi-Fi that opened the station's address itself: told to use the sign-in page")
+    resp = post_form(phone, "/portal/charge", {})
+    check("m=no_gateway" in resp.headers["location"] and st.state == State.AWAITING_PAYMENT,
+          "and asks for a free charge from there: refused, nothing used")
+
+    # The station screen, its keys and /debug: only this computer.
+    check(phone.get("/").status_code == 303 and phone.get("/").headers["location"] == "/portal",
+          "a phone that opens the station's address gets the portal, not the operator's screen")
+    try:
+        with phone.websocket_connect("/ws", headers={"host": STATION_LAN}):
+            pass
+        check(False, "/ws from a phone on the Wi-Fi refused")
+    except WebSocketDisconnect as exc:
+        check(exc.code == 1008 and st.state == State.AWAITING_PAYMENT,
+              "/ws from a phone on the Wi-Fi: refused (it cannot press ESC, C or E)")
+    local = portal_client(main, "127.0.0.1", host="127.0.0.1:8030")
+    with local.websocket_connect("/ws", headers={"host": "127.0.0.1:8030"}) as ws:
+        first = ws.receive_json()
+    check(local.get("/").status_code == 200 and first["free"]["charging"] is False,
+          "this computer: the station screen and its socket, as always")
+    html = (Path(__file__).resolve().parent / "static" / "index.html").read_text(encoding="utf-8")
+    check(all(t in html for t in ('id="sosnums"', 'id="sosfree"', '"free charge left"', '? "free charge"',
+                                  "sos(fr, em, d.wifi)", "a day per phone on the Wi-Fi")),
+          "the station screen: the emergency band (numbers, free minutes, the Wi-Fi), the free charge's labels")
+
+    text = files_text(tmp)
+    check(not any(form_ in text for m in (MAC1, MAC2, stranger_mac) for form_ in mac_forms(m))
+          and PHONE1 not in text and PHONE2 not in text and stranger not in text,
+          "no MAC and no phone address in any file the station wrote (log, day file)")
+
+
+def test_portal_simulate(tmp: Path) -> None:
+    print("free emergency minutes: the portal simulated (no router)")
+    env = {"WIFI_PORTAL": "simulate", "FREE_CHARGE_SECONDS": "120", "FREE_INTERNET_SECONDS": "120",
+           "EMERGENCY_NUMBERS": "Emergency 112", "APP_URL": "https://ficha-stellar.vercel.app"}
+    main = import_main(tmp, env, reload=True)
+    main.neighbour = lambda ip: None
+    st = main.station
+    here = portal_client(main, "127.0.0.1", host="127.0.0.1:8000")
+    page = here.get("/portal").text
+    import html as html_mod
+    links = [html_mod.unescape(a) for a in re.findall(r'<a\b[^>]*href="([^"]*)"', page)]
+    pay = [a for a in links if a.startswith("https://")]
+    check(len(pay) == 1 and pay[0].startswith("https://ficha-stellar.vercel.app/pay?uri=web%2Bstellar%3Apay%3F")
+          and parse_qs(urlsplit(pay[0]).query)["uri"] == [main.snapshot()["uri"]]
+          and not any(a.startswith("web+stellar:") for a in links),
+          "direct mode with APP_URL: 'Pay with Ficha' opens the web app's /pay?uri=<the screen's pay link>, which any "
+          "browser opens (the sign-in window, a phone without the app), not a bare web+stellar: link")
+    check("SIMULATED: no Wi-Fi router here" in page and 'href="tel:112"' in page,
+          "simulate: the portal on this computer, marked as simulated")
+    html = (Path(__file__).resolve().parent / "static" / "index.html").read_text(encoding="utf-8")
+    sos_js = html[html.index("function sos("):html.index("function fit(")]
+    check(main.snapshot()["free"]["portal"] == "simulate" and 'fr.portal === "simulate"' in sos_js
+          and 's.textContent = "simulated"' in sos_js and "no internet is given" in sos_js
+          and sos_js.index("if (sim)") < sos_js.index('b.textContent = "Free "') and "fr.portal]" in sos_js,
+          "the station screen's band says 'simulated' first (never cut off), and that no internet is given")
+    resp = post_form(here, "/portal/internet", {"clientmac": "02:11:22:33:44:55"})
+    check("m=internet_simulated" in resp.headers["location"] and "clientmac=02%3A11%3A22%3A33%3A44%3A55"
+          in resp.headers["location"], "free internet with a test MAC: 'internet granted (simulated)'")
+    shown = here.get(resp.headers["location"]).text
+    grant = [x for x in st.log.read() if x["kind"] == "free_grant"][-1]
+    check("Internet granted (simulated)" in shown and grant["simulated"] is True and grant["what"] == "internet"
+          and "Free internet granted (simulated)" in main.snapshot()["notice"],
+          "said on the portal and on the station screen, logged with simulated: true")
+    check("m=internet_used" in post_form(here, "/portal/internet", {"clientmac": "02-11-22-33-44-55"}).headers["location"],
+          "the same test MAC in another notation: the same device, already used")
+    check("m=bad_mac" in post_form(here, "/portal/charge", {"clientmac": "ff:ff:ff:ff:ff:ff"}).headers["location"]
+          and st.state == State.AWAITING_PAYMENT, "an invalid test MAC: refused")
+    resp = post_form(here, "/portal/charge", {})
+    check("m=charge_started" in resp.headers["location"] and st.state == State.COURTESY and st.session.free_charge,
+          "this computer's own test device: a free charge (the relay closes)")
+    st.end_session()
+    lan = portal_client(main, PHONE1, host="127.0.0.1:8000")
+    check("m=unknown_device" in post_form(lan, "/portal/charge", {"clientmac": "02:aa:aa:aa:aa:aa"},
+                                          origin="http://127.0.0.1:8000").headers["location"],
+          "a test MAC is taken only from this computer: another address must be a real neighbour")
+    text = files_text(tmp)
+    check("02:11:22:33:44:55" not in text and "021122334455" not in text, "the test MAC is not on disk either")
+
+
+def test_free_rollover(tmp: Path) -> None:
+    print("free emergency minutes: yesterday's salt goes at midnight, with no phone on the portal")
+    import inspect
+    from freeminutes import local_day
+    env = {"WIFI_PORTAL": "simulate", "FREE_CHARGE_SECONDS": "120", "FREE_INTERNET_SECONDS": "120",
+           "EMERGENCY_NUMBERS": "Emergency 112"}
+    main = import_main(tmp, env, reload=True)
+    now = [float(EPOCH)]
+    main.free.clock = lambda: now[0]
+    day1 = local_day(now[0])
+    main.free.grant(MAC1, "charge")
+    check(sorted(p.name for p in tmp.glob(".free_minutes*")) == [f".free_minutes.{day1}.json"],
+          "(a free charge granted: the day's file, with its salt)")
+    now[0] += 3 * 86_400  # three days on, the station running, no phone on the portal
+    day2 = local_day(now[0])
+    check((tmp / f".free_minutes.{day1}.json").exists(), "(nothing has asked for a device since)")
+
+    async def run() -> None:
+        task = asyncio.create_task(main.free_days())
+        await asyncio.sleep(0.2)
+        task.cancel()
+    asyncio.run(run())
+    files = sorted(p.name for p in tmp.glob(".free_minutes*"))
+    check(files == [f".free_minutes.{day2}.json"] and main.free.day == day2,
+          "the station's own minute check rolls the day: the old day's file and its salt deleted, no phone needed")
+    check(main.FREE_ROLL_SECONDS <= 60 and "free_days()" in inspect.getsource(main.lifespan),
+          "started with the station, every minute at most: within a minute of local midnight")
+
+    def broken():
+        raise PermissionError(13, "Permission denied")
+    main.free.rollover = broken
+    ticks: list[int] = []
+    tick = main.station.tick
+    main.station.tick = lambda reading: (ticks.append(1), tick(reading))
+
+    async def run2() -> None:
+        hb = asyncio.create_task(main.heartbeat())
+        days = asyncio.create_task(main.free_days())
+        await asyncio.sleep(1.3)
+        alive = not days.done()
+        hb.cancel()
+        days.cancel()
+        check(len(ticks) == 2 and alive,
+              "a reset that fails is logged and tried again; the heartbeat (countdown, relay) goes on")
+    try:
+        logging.disable(logging.CRITICAL)
+        asyncio.run(run2())
+    finally:
+        logging.disable(logging.NOTSET)
+        del main.station.tick
+        del main.free.rollover
+
+
 if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
@@ -3490,7 +4221,10 @@ if __name__ == "__main__":
              ("q", test_custody_restart), ("r", test_escrow_watch), ("r2", test_escrow_rpc30),
              ("s", test_custody_screens),
              ("t", test_custody_receipts), ("u", test_custody_edges), ("v", test_ledger_reset),
-             ("w", test_registry_rules), ("x", test_custody_waiting), ("y", test_custody_rechecks))
+             ("w", test_registry_rules), ("x", test_custody_waiting), ("y", test_custody_rechecks),
+             ("z", test_meter_sign), ("z2", test_charger_plugged), ("f1", test_free_off), ("f2", test_free_config),
+             ("f3", test_free_ledger), ("f4", test_free_charge), ("f4b", test_free_charge_payer), ("f5", test_portal),
+             ("f6", test_portal_simulate), ("f7", test_free_rollover))
     with tempfile.TemporaryDirectory() as d:
         for name, test in tests:
             (Path(d) / name).mkdir()

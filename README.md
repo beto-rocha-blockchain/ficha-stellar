@@ -43,6 +43,34 @@ place, a café, a coworking space, an event.
   <img src="docs/media/station-charging.png" alt="The station's screen while a phone charges: 3 418 mA, 1:48 left of 2 fichas, demo station YX3DGE on testnet" width="760">
 </p>
 
+## Public safety mode
+
+Ficha also goes where a dead phone can be dangerous: bus and train
+stations, airports, remote places, neighbourhoods with high rates of
+violence or kidnapping. There a station's own Wi-Fi (a travel router running
+OpenWrt and openNDS, a captive portal) gives **every phone, once a day,
+2 minutes of charging and 2 minutes of internet, free**, shows the **local
+emergency numbers first** (112 in Portugal; 190, 192 and 193 in Brazil), and
+lets anyone **pay for more charging with no mobile data**: the Ficha app and
+the Stellar endpoints it uses are open on that Wi-Fi before any sign-in.
+
+- A phone is known only by a salted hash of its Wi-Fi MAC address, whose
+  salt is new every day and deleted with its day. No MAC, IP or name is kept.
+- No money moves for a free minute, and the station still holds no key: no
+  Stellar key, no router password.
+- The free charge is the station's (its relay, on the courtesy minute's
+  path); the free internet is the router's (openNDS, and a script that lets
+  each phone in once a day). The 2 minutes of internet are a courtesy for an
+  ordinary phone, not a hard limit.
+- Off by default (`WIFI_PORTAL=off`). The demo `.env` examples turn it on as
+  a simulation on the laptop; the router's side is tested in WSL and first
+  runs on the real router at HackMeridian.
+- **Ficha is not an emergency service and does not replace one.**
+
+Why, how, privacy, abuse and honest limits, who can fund the free minutes,
+and the legal questions still open: [docs/public-safety.md](docs/public-safety.md).
+The router's setup: [openwrt/README.md](openwrt/README.md).
+
 ## Try it in 60 seconds
 
 **From anywhere**, with no station (start here when you review Ficha
@@ -329,7 +357,7 @@ the relay switches **5 V only**.
 | USB wall charger (in Lisbon: an EU plug, rated 100–240 V) | the power source |
 | USB cable with its red VBUS wire cut and taken through the relay's COM and NO | the switched 5 V line to the phone |
 | Android phone with USB debugging (a moto g54 on the bench) | the meter: the station reads its battery current over ADB |
-| Travel router (for the event) | a network where the laptop and the phone can reach each other, for WiFi ADB |
+| Travel router (for the event; OpenWrt) | a network where the laptop and the phone can reach each other, for WiFi ADB; in [public safety mode](#public-safety-mode) it also runs openNDS, the captive portal that sends phones to the station's page ([openwrt/](openwrt/)) |
 
 ```
  USB wall charger ── VBUS (red) ─[COM  relay  NO]─┬── phone
@@ -361,7 +389,7 @@ Wiring of both topologies, the probe rules and every setting:
 
 | Rule | Enforced by |
 |---|---|
-| Prepaid | the station closes the relay only for a credited payment, or for the operator's free courtesy minute (`session.py`); in custody the deposit is on the contract before any paid power flows |
+| Prepaid | the station closes the relay only for a credited payment, or for a free courtesy: the operator's courtesy minute, or a phone's free emergency charge in public safety mode, once a day per phone and never during a paid session (`session.py`); in custody the deposit is on the contract before any paid power flows |
 | The money goes only to the venue, or back to the payer; the operator never holds it | direct: the payment's destination is the venue's key, checked against the signed registry (`app/src/pay/check.ts`); custody: FichaEscrow has no admin, upgrade or withdraw, and pays only the session's venue and payer (`contracts/escrow/src/lib.rs`) |
 | The station never holds a signing key or a Stellar account, never signs, never pays a fee | it reads with no key (Horizon, Soroban RPC simulation and events); `config.py` refuses a secret key (`S…`) in any key setting. Its one secret, a random seed per custody session, signs nothing and can only refund that session's payer |
 | Billing by time; energy measured and shown, never billed | `session.py` (`consumed_seconds`); the contract splits by time units |
@@ -370,7 +398,7 @@ Wiring of both topologies, the probe rules and every setting:
 | Unused time rounds in the payer's favour | the station rounds U up; the contract rounds the payer's share up |
 | Never the relay's NC contact | the wiring; `relay.py` opens on start, crash and shutdown; `supervisor.py` opens it when the station dies |
 | Keys never leave the phone | `app/src/wallet/` (AES-256-GCM under PBKDF2 of the PIN); Android backups off |
-| No CDN on the station screen | `static/` serves its own fonts and logo; it renders offline |
+| No CDN on the station screen | `static/` serves its own fonts and logo; it renders offline. The Wi-Fi's page of public safety mode has no script and loads nothing from another host (`portal.py`, `templates/portal.html`) |
 | Direct mode keeps working | SEP-7 stays the default; custody is refused on the public network (`config.py`, `registry_format.py`, the app) |
 
 ## What is real and what is simulated
@@ -384,6 +412,7 @@ Wiring of both topologies, the probe rules and every setting:
 | The station's custody mode against the contract, with real deposits from the app | The recorded custody runs used `MOCK=true`: simulated relay and phone (`.env.lisbon.example`). Real hardware was verified in direct mode |
 | | The ADB meter needs USB debugging on the measured phone: a demo meter, not one for the public. A meter at the outlet is roadmap |
 | | No audit; custody is testnet only. A smart-account payer is tested in the contract's tests (a secp256r1 account contract), not on testnet; the app's wallet is a `G…` key |
+| Public safety mode, the station's side: the Wi-Fi's page in English and Portuguese, the free charge on the relay, the daily salted ledger, the emergency numbers on the screen (smoke-tested, and run on a simulated station) | Its router's side (`openwrt/`: openNDS, `binauth.sh`, `setup.sh`) is tested in WSL on a fake router only; it first runs on the real router at the event. Without the router (`WIFI_PORTAL=simulate`) free internet is written down, not given, and the screen and the page say SIMULATED |
 
 ## Adoption and market
 
@@ -395,6 +424,10 @@ Wiring of both topologies, the probe rules and every setting:
   has. Direct mode pays it straight to its own Stellar account; custody
   pays it through the contract. There is no card terminal and no card fee
   on a payment of cents, and Ficha, the operator, never holds the money.
+- **Where a phone is a lifeline:** transit hubs, remote places, areas with
+  high rates of violence or kidnapping. Free emergency minutes bring people
+  to a station where paid minutes are one scan away, and a venue, a city, an
+  NGO or a sponsor can fund them ([public safety mode](#public-safety-mode)).
 - **What a station is:** a computer running the station, a USB relay
   board and a USB charger ([Hardware](#hardware)). The venue keeps its own
   key, on its own phone; the station holds none.
@@ -455,15 +488,19 @@ built before the event: the first commit is from 28 September 2026, the
 escrow contract and custody mode from 30 September to 2 October 2026. A
 station fix on 23 October 2026 keeps it reading the testnet RPC after the
 RPC's move to Stellar RPC 30 (`requirements.txt` asks for Python
-stellar-sdk 16.1.1 or later).
+stellar-sdk 16.1.1 or later). [Public safety mode](#public-safety-mode) was
+added on 23 October 2026 too, off by default: the station's side, and the
+router's scripts, tested in WSL. Setting it up on the real router is work
+for the event.
 
 The test suites, as they printed on 23 October 2026:
 
 | Part | Suite | Result |
 |---|---|---|
-| Station | `python smoke_test.py` | 447 checks pass |
+| Station | `python smoke_test.py` | 574 checks pass |
 | App | `npm test` in `app/` | 336 tests pass; 5 opt-in testnet tests skipped by default |
 | Contract | `cargo test` in `contracts/escrow` | 37 tests pass |
+| Router scripts | `sh openwrt/test-binauth.sh` and `sh openwrt/test-setup.sh` (WSL or Linux, busybox) | 61 and 83 checks pass |
 
 The opt-in testnet tests (`FICHA_TESTNET_E2E=1`) send real transactions;
 recorded runs are in [docs/testnet-e2e.md](docs/testnet-e2e.md), every
@@ -505,6 +542,12 @@ camera. Hardware
 versions: `.env.mains.example` (wall charger, phone over WiFi ADB) and
 `.env.usbvbus.example` (phone on the laptop's USB).
 
+All four `.env` examples also turn on [public safety mode](#public-safety-mode),
+simulated (`WIFI_PORTAL=simulate`): the page a phone would get on the
+station's Wi-Fi is at <http://127.0.0.1:8000/portal>, on the laptop itself
+(with the mode on, the station screen and its keys answer only to the
+laptop). With the router, see [openwrt/README.md](openwrt/README.md).
+
 ```bash
 python smoke_test.py               # the station's checks, on a fake clock
 ```
@@ -533,6 +576,8 @@ charges, 7 custody mode.
 |---|---|
 | `main.py`, `session.py`, `escrow.py`, `stellar.py`, `relay.py`, `meter.py`, `qr.py`, `config.py`, `supervisor.py`, `diag.py` | the station (Python, FastAPI): sessions and probes, the escrow watcher, Horizon, the relay, the ADB meter, QR payloads, settings, the relay's watchdog, hardware diagnostics |
 | `static/index.html` | the station's screen, with its own fonts |
+| `portal.py`, `templates/portal.html`, `freeminutes.py` | public safety mode, the station's side: the Wi-Fi's page, and each phone's free minutes of the day under a daily salted hash |
+| `openwrt/` | public safety mode, the router's side: openNDS's setup, the once-a-day free internet script, their tests |
 | `smoke_test.py` | the station's checks |
 | `registry/`, `registry_format.py`, `registry_check.py`, `tools/registry.py` | the signed station registry: the file, its format, the station's self-check, the offline signing tool |
 | `contracts/escrow/` | FichaEscrow (Soroban), its tests and the shared test vectors |
@@ -567,6 +612,14 @@ charges, 7 custody mode.
   entries instead of renting a new one per session, so a deposit stops
   paying a new entry's rent.
 - **Before custody on mainnet:** an audit of FichaEscrow.
+- **Public safety mode, next.** The router's side on the real router (at
+  the event); **sponsored fichas** on the ledger, so a venue, a city, an NGO
+  or a sponsor can pay for the free emergency minutes and see on the ledger
+  how many it paid for (not built: the escrow has no sponsor deposit yet);
+  a hard limit on the free internet (the app and the Stellar endpoints on
+  addresses of their own); a pilot once the legal questions in
+  [docs/public-safety.md](docs/public-safety.md#legal-to-verify) have
+  answers.
 - Also: a cable sensor instead of the C key for the free courtesy minute,
   several ports per station, a certified enclosure.
 
@@ -577,6 +630,9 @@ charges, 7 custody mode.
 | [docs/architecture.md](docs/architecture.md) | components, diagrams, who can move money, the honest limits |
 | [docs/station-app-contract.md](docs/station-app-contract.md) | the binding spec between the station, the app and the contract |
 | [docs/operators.md](docs/operators.md) | running a station: settings, wiring, probes, the log, the registry |
+| [docs/public-safety.md](docs/public-safety.md) | public safety mode: why, how, privacy, limits, funding, the legal questions |
+| [docs/free-minutes.md](docs/free-minutes.md) | public safety mode on the station: the Wi-Fi's page, identity, settings |
+| [openwrt/README.md](openwrt/README.md) | public safety mode on the router: setup at the event, the walled garden, rollback |
 | [docs/testnet-e2e.md](docs/testnet-e2e.md) | recorded testnet runs, every transaction linked |
 | [contracts/escrow/README.md](contracts/escrow/README.md) | the contract's build, deployment, CLI calls and upkeep |
 | [app/README.md](app/README.md) | the app: routes, modules, key protection, Android |

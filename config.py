@@ -11,6 +11,7 @@ import hashlib
 import ipaddress
 import math
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -87,6 +88,22 @@ I128_MAX = 2 ** 127 - 1
 
 # WIFI_SECURITY values, as written in the WiFi QR. WPA covers WPA and WPA2.
 WIFI_SECURITY = {"": "WPA", "wpa": "WPA", "wpa2": "WPA", "nopass": "nopass"}
+
+# Free emergency minutes (docs/free-minutes.md): who gives the free internet.
+# off: no portal, no free minutes. opennds: the station's Wi-Fi router runs
+# openNDS and sends each phone to this station's portal (FAS level 0); the
+# router gives and limits the free internet (a courtesy limit, not a hard one:
+# openwrt/README.md). simulate: no router (a laptop demo): the
+# portal records grants and says what a router would do.
+WIFI_PORTALS = ("off", "opennds", "simulate")
+# When a device's daily allowance starts over. Only local midnight: a rolling
+# 24 h window would have to recognise a device across two daily salts, which
+# is exactly the linking the daily salt exists to prevent (freeminutes.py).
+FREE_RESETS = ("midnight",)
+FREE_SECONDS_MAX = 3600
+EMERGENCY_NUMBERS_MAX = 6
+EMERGENCY_LABEL_MAX_CHARS = 32
+_EMERGENCY_NUMBER = re.compile(r"\+?[0-9]{2,15}")
 
 
 class ConfigError(Exception):
@@ -165,6 +182,19 @@ def _hex_bytes(name: str, default: str) -> bytes:
         return bytes.fromhex(raw)
     except ValueError:
         raise ConfigError(f"{name}={raw!r} is not a hex byte string like 'A0 01 01 A2'") from None
+
+
+def _emergency(name: str) -> tuple[tuple[str, str], ...]:
+    """'Police 190; Ambulance 192; Fire 193' -> (("Police", "190"), ...): the
+    number is the last word of each entry, the label all before it (maybe
+    empty). Judged in validate_free()."""
+    entries = []
+    for part in re.split(r"[;,\n]", os.getenv(name, "")):
+        part = part.strip()
+        if part:
+            label, _, number = part.rpartition(" ")
+            entries.append((label.strip(), number.strip()))
+    return tuple(entries)
 
 
 def _path(name: str, default: str) -> Path:
@@ -248,6 +278,20 @@ class Config:
     wifi_ssid: str  # "" = no network offered, nothing shown
     wifi_password: str
     wifi_security: str  # WPA | nopass
+
+    # free emergency minutes (docs/free-minutes.md), per device per day, through
+    # the Wi-Fi portal. All off by default: the station behaves as before.
+    wifi_portal: str = "off"  # off | opennds | simulate
+    free_charge_seconds: int = 0  # 0 = no free charge
+    free_internet_seconds: int = 0  # 0 = no free internet
+    free_reset: str = "midnight"  # the allowance and its salt are per local calendar day
+    # (label, number), shown first on the portal and on the station screen
+    emergency_numbers: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def free_on(self) -> bool:
+        """The Wi-Fi portal is on: the station listens on the router's network."""
+        return self.wifi_portal != "off"
 
     @property
     def is_native(self) -> bool:
@@ -391,6 +435,11 @@ def load(env_file: str | os.PathLike | None = None) -> Config:
         wifi_ssid=os.getenv("WIFI_SSID", ""),
         wifi_password=os.getenv("WIFI_PASSWORD", ""),
         wifi_security=WIFI_SECURITY.get(_str("WIFI_SECURITY").lower(), _str("WIFI_SECURITY")),
+        wifi_portal=_str("WIFI_PORTAL").lower() or "off",
+        free_charge_seconds=_int("FREE_CHARGE_SECONDS", 0),
+        free_internet_seconds=_int("FREE_INTERNET_SECONDS", 0),
+        free_reset=_str("FREE_RESET").lower() or "midnight",
+        emergency_numbers=_emergency("EMERGENCY_NUMBERS"),
     )
     validate(cfg)
     return cfg
@@ -534,6 +583,60 @@ def validate(cfg: Config) -> None:
                               "(or set WIFI_SECURITY=nopass for an open network)")
         if cfg.wifi_security == "nopass" and cfg.wifi_password:
             raise ConfigError("WIFI_SECURITY=nopass but WIFI_PASSWORD is set: pick one")
+
+    validate_free(cfg)
+
+
+def validate_free(cfg: Config) -> None:
+    """Free emergency minutes (docs/free-minutes.md): a free charge and free
+    internet per device per day, given through the station's Wi-Fi portal.
+    A device is known only through that portal, so the minutes need it. The
+    station still holds no secret: the router limits the internet."""
+    if cfg.wifi_portal not in WIFI_PORTALS:
+        raise ConfigError(f"WIFI_PORTAL={cfg.wifi_portal!r}: use off, opennds (the station's Wi-Fi router runs "
+                          "openNDS) or simulate (no router: a demo on this computer)")
+    if cfg.free_reset not in FREE_RESETS:
+        if cfg.free_reset in ("rolling", "24h", "rolling24h", "rolling_24h"):
+            raise ConfigError("FREE_RESET=rolling is not supported: a rolling 24 h window would have to recognise "
+                              "a phone across two daily salts, which is the linking the daily salt prevents. "
+                              "Use FREE_RESET=midnight (local time), the default")
+        raise ConfigError(f"FREE_RESET={cfg.free_reset!r}: use midnight (local time), the default")
+    for name, value in (("FREE_CHARGE_SECONDS", cfg.free_charge_seconds),
+                        ("FREE_INTERNET_SECONDS", cfg.free_internet_seconds)):
+        if not 0 <= value <= FREE_SECONDS_MAX:
+            raise ConfigError(f"{name}={value}: from 0 (off) to {FREE_SECONDS_MAX} seconds a day "
+                              "(120 is two emergency minutes)")
+    if (cfg.free_charge_seconds or cfg.free_internet_seconds) and not cfg.free_on:
+        raise ConfigError("FREE_CHARGE_SECONDS and FREE_INTERNET_SECONDS are per phone per day, and this station "
+                          "knows a phone only through its Wi-Fi portal: set WIFI_PORTAL=opennds (the router) or "
+                          "simulate (a demo without one), or set both to 0")
+
+    numbers = cfg.emergency_numbers
+    if len(numbers) > EMERGENCY_NUMBERS_MAX:
+        raise ConfigError(f"EMERGENCY_NUMBERS lists {len(numbers)} numbers: at most {EMERGENCY_NUMBERS_MAX}, "
+                          "the ones a person in danger needs first")
+    for label, number in numbers:
+        if not _EMERGENCY_NUMBER.fullmatch(number):
+            raise ConfigError(f"EMERGENCY_NUMBERS: {f'{label} {number}'.strip()!r} does not end in a phone number. "
+                              "Use 'label number' pairs separated by ';', e.g. "
+                              "EMERGENCY_NUMBERS='Emergency 112' or 'Police 190; Ambulance 192; Fire 193'")
+        if len(label) > EMERGENCY_LABEL_MAX_CHARS or not label.isprintable():
+            raise ConfigError(f"EMERGENCY_NUMBERS: the label {label!r} must be up to {EMERGENCY_LABEL_MAX_CHARS} "
+                              "printable characters")
+    if not cfg.free_on:
+        return
+    if not numbers:
+        raise ConfigError(f"WIFI_PORTAL={cfg.wifi_portal} needs EMERGENCY_NUMBERS: the portal shows them first. "
+                          "E.g. EMERGENCY_NUMBERS='Emergency 112' (Portugal, the EU) or "
+                          "'Police 190; Ambulance 192; Fire 193' (Brazil)")
+    if cfg.wifi_portal == "opennds":
+        if _is_loopback(cfg.host):
+            raise ConfigError(f"WIFI_PORTAL=opennds with HOST={cfg.host}: phones reach the portal over the router's "
+                              "Wi-Fi, so HOST must be this computer's address on the router's network, or 0.0.0.0. "
+                              "The station screen, its keys and /debug still answer only to this computer")
+        if not cfg.wifi_ssid:
+            raise ConfigError("WIFI_PORTAL=opennds needs WIFI_SSID (and WIFI_SECURITY, WIFI_PASSWORD): the "
+                              "screen's join QR is how phones reach the portal")
 
 
 def validate_charge_verify(cfg: Config) -> None:

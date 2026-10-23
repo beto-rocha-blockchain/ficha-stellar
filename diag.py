@@ -149,7 +149,7 @@ def cmd_probe(cfg) -> int:
 
 
 def _fmt(reading) -> str:
-    ma, mv, ok = reading
+    ma, mv, ok = reading[:3]
     if not ok:
         return "  -- no reading --"
     return f"{ma:>7} mA  {mv:>5} mV  {ma * mv / 1e6:>6.2f} W"
