@@ -10,8 +10,9 @@ node_modules/
 /dist/
 /dist-site/
 .vercel/
-# Session logs hold refund-chain seeds; never commit one, under any name.
-sessions*.jsonl
+# Session logs hold refund-chain seeds and payers' keys; SESSION_LOG can be
+# any name, and the repo tracks no .jsonl, so none is ever committed.
+*.jsonl
 # Keys never live in the repo: secret files, key folders, Android signing.
 *.key
 keys/
