@@ -311,8 +311,9 @@ rules: [free-minutes.md](free-minutes.md).
    started and never replays history.
 7. Registry: list the station (same `STATION_ID`, the mainnet host key, asset
    and price) in `registry/stations.public.json`, sign it and verify it with
-   the pinned public registry key (section 5). The app warns loudly before
-   paying a station it cannot find there, or whose host key differs. Set
+   the pinned public registry key (section 5). The app blocks payment to a
+   station it cannot find there, or whose host key differs, and on Mainnet
+   to any QR without a station code. Set
    `REGISTRY_KEY` to that key: none is pinned for public yet, and the station
    refuses to start without it (once one is pinned, any other is refused).
    On public the station also refuses to start without `STATION_ID`, with
@@ -332,6 +333,35 @@ three polls, with a `HORIZON_POLL_SECONDS` above 3.3): a real payment made
 then would not be seen until it does. A payment made just before is credited
 when Horizon answers again. On testnet a failing Horizon only shows in the
 footer.
+
+### Refunds by hand (direct mode)
+
+A direct-mode station cannot refund: it holds no key. The host refunds from
+its own wallet, with real money on public, so:
+
+1. **What is due** comes from `sessions.jsonl` only: a session record's
+   `refund_hint` (`change` + `capped` + `unused`), and the whole amount of
+   every `orphan`, `refused` and `underpaid` line. `dust` lines are never
+   refunded (section 5). An `interrupted` session has only `change`: the
+   rest is unknown, and the host decides.
+2. **Who gets it** is the `payer` written in that line; for a session, each
+   payment's own `credited` line. When several wallets paid one session,
+   each gets its own change, and the capped and unused part is split by what
+   each paid.
+3. **Copy the destination from the log line itself**, never from a wallet's
+   history or its "recent" addresses: a look-alike address (same first and
+   last characters) may have sent the host a tiny payment exactly so that it
+   is copied by mistake. Before signing, compare the whole address with the
+   log line, at least its first and last 6 characters.
+4. Memo `refund <SESSION>` (a text memo; `refund YX3DGE.F3MF95D8` fits in
+   28 bytes). A payer who paid from an exchange's shared account needs the
+   exchange's own memo: ask, or the refund is lost.
+5. If the wallet says the outcome is unknown, never send it again until the
+   host's history shows whether it landed.
+6. Keep a copy of `sessions.jsonl` outside any temporary folder. After an
+   event, list every payment the host received (stellar.expert or Horizon)
+   and match each to a log line: a payment made while the station was off,
+   or before its first start, is in no log.
 
 ## 5. How money flows
 
