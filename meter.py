@@ -558,7 +558,10 @@ class AdbMeter(Meter):
         unit = ""
         if self.mode == "sysfs" and self.scale is None:
             unit = " uA" if self.unit_ua else " mA?"
-        return f"adb/{self.transport} {self.detail}{unit}"
+        # The screen and /api/state are seen by anyone at the station: the
+        # phone's LAN address stays in the log and in diag's report.
+        detail = self.detail.replace(self.serial, "ADB_SERIAL") if self.serial else self.detail
+        return f"adb/{self.transport} {detail}{unit}"
 
     def report(self) -> str:
         if self.scale is not None:

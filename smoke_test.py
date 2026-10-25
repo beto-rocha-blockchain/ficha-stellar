@@ -3706,6 +3706,12 @@ def test_meter_sign(tmp: Path) -> None:
     check(not cold.sign_known() and cold._sign() == 1,
           "'Charging' readings alone never calibrate the sign")
 
+    lost = bare_meter()  # the phone dropped off the Wi-Fi
+    lost.transport, lost.serial, lost.mode = "tcp", "10.9.8.7:5555", None
+    lost.detail = "cannot connect to 10.9.8.7:5555: failed to connect to '10.9.8.7:5555'"
+    check("10.9.8.7" not in lost.describe() and "ADB_SERIAL" in lost.describe(),
+          "the screen's meter line never shows the phone's LAN address")
+
 
 def test_charger_plugged(tmp: Path) -> None:
     print("charge verification from the phone's own charger status: net negative under load still charges here")
