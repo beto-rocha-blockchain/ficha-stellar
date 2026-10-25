@@ -242,29 +242,45 @@ describe("refund against the host's payments on the ledger", () => {
     expect(ledger(uri("0.95"), [], false)).toEqual({ state: "no_payment", complete: false });
   });
 
-  it("allows at most what the payer paid under the session, less what the host already sent it back", () => {
+  it("allows at most what the payer paid under the session", () => {
     const paid = [op(PAYER, PUBLIC_HOST, "1.0000000", SESSION), op(PAYER, PUBLIC_HOST, "0.5000000", SESSION)];
-    expect(ledger(uri("1.5"), paid)).toMatchObject({ state: "ok", left: "1.5" });
-    expect(ledger(uri("0.95"), paid)).toMatchObject({ state: "ok", left: "1.5", refunds: [] });
-    expect(ledger(uri("1.5000001"), paid)).toMatchObject({ state: "more_than_paid", left: "1.5" });
+    expect(ledger(uri("1.5"), paid)).toMatchObject({ state: "ok", total: "1.5" });
+    expect(ledger(uri("0.95"), paid)).toMatchObject({ state: "ok", total: "1.5" });
+    expect(ledger(uri("1.5000001"), paid)).toMatchObject({ state: "more_than_paid", total: "1.5" });
     // A smaller payment than the refund: the amount is not the payer's own money.
-    expect(ledger(uri("5.5"), [op(PAYER, PUBLIC_HOST, "1.0000000", SESSION)])).toMatchObject({ state: "more_than_paid", left: "1" });
-    // What the host already sent it with this refund's memo, in its asset, counts against it; anything else does not.
-    const sent = [op(PUBLIC_HOST, PAYER, "0.5000000", "refund 8DY7RJ.FAFXJXBZ"), op(PUBLIC_HOST, PAYER, "9.0000000", "rent"), op(PUBLIC_HOST, LOOKALIKE, "9.0000000", "refund 8DY7RJ.FAFXJXBZ")];
-    expect(ledger(uri("1"), [...sent, ...paid])).toMatchObject({ state: "ok", left: "1" });
-    expect(ledger(uri("1.0000001"), [...sent, ...paid])).toMatchObject({ state: "more_than_paid", left: "1" });
+    expect(ledger(uri("5.5"), [op(PAYER, PUBLIC_HOST, "1.0000000", SESSION)])).toMatchObject({ state: "more_than_paid", total: "1" });
+  });
+
+  it("blocks once the host has sent the payer a payment with this refund's memo, in its asset", () => {
+    const paid = [op(PAYER, PUBLIC_HOST, "5.0000000", SESSION)];
+    // The same 0.95 paid before (from this page, the phone's QR or another tab): never again, whatever is left of the 5.
+    const before = op(PUBLIC_HOST, PAYER, "0.9500000", "refund 8DY7RJ.FAFXJXBZ");
+    const c = ledger(uri("0.95"), [before, ...paid]);
+    expect(c).toMatchObject({ state: "refunded", refunded: "0.95" });
+    expect(c.state === "refunded" && c.refunds.map((p) => p.txHash)).toEqual([before.transaction_hash]);
+    expect(ledger(uri("0.95"), [before, op(PUBLIC_HOST, PAYER, "0.1000000", "refund 8DY7RJ.FAFXJXBZ"), ...paid])).toMatchObject({ refunded: "1.05" });
+    // Even with no payment found: a refund was sent under it.
+    expect(ledger(uri("0.95"), [before]).state).toBe("refunded");
+    // Another memo, another address (a look-alike too) or another asset is not this refund.
+    const other = [
+      op(PUBLIC_HOST, PAYER, "0.9500000", "rent"),
+      op(PUBLIC_HOST, PAYER, "0.9500000", "refund 8DY7RJ.K7M2QXAB"),
+      op(PUBLIC_HOST, LOOKALIKE, "0.9500000", "refund 8DY7RJ.FAFXJXBZ"),
+      op(PUBLIC_HOST, PAYER, "0.9500000", "refund 8DY7RJ.FAFXJXBZ", { asset: USDC }),
+    ];
+    expect(ledger(uri("0.95"), [...other, ...paid])).toMatchObject({ state: "ok", total: "5" });
   });
 
   it("counts a session's payment below one ficha (underpaid, or after it closed) but never lets it cover more", () => {
     // Address poisoning's 0.0001 XLM under a session's memo: at most that 0.0001 back to its own sender.
     const dust = [op(LOOKALIKE, PUBLIC_HOST, "0.0001000", SESSION), op(PAYER, PUBLIC_HOST, "0.0001000", SESSION)];
-    expect(ledger(uri("0.95"), dust)).toMatchObject({ state: "more_than_paid", left: "0.0001" });
+    expect(ledger(uri("0.95"), dust)).toMatchObject({ state: "more_than_paid", total: "0.0001" });
     expect(ledger(uri("0.0001"), dust).state).toBe("ok");
     expect(ledger(uri("0.3"), [op(PAYER, PUBLIC_HOST, "0.3000000", SESSION)]).state).toBe("ok");
   });
 
   it("matches a payment's REF by its transaction hash, from the payer, for at least one ficha (less is dust)", () => {
-    expect(ledger(uri("1", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", null, { hash: HASH })])).toMatchObject({ state: "ok", left: "1" });
+    expect(ledger(uri("1", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", null, { hash: HASH })])).toMatchObject({ state: "ok", total: "1" });
     expect(ledger(uri("1", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", "hello", { hash: HASH.toUpperCase() })]).state).toBe("ok");
     expect(ledger(uri("1.5", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", null, { hash: HASH })]).state).toBe("more_than_paid");
     // The same hash prefix, from another sender: not the payer's money.
@@ -280,7 +296,7 @@ describe("refund against the host's payments on the ledger", () => {
   it("reads the host's payments on the refund's network, with their transactions' memos", async () => {
     const urls = stubHorizon([op(PAYER, PUBLIC_HOST, "1.0000000", SESSION), op(SPAMMER, PUBLIC_HOST, "0.0001000", null)]);
     try {
-      expect(await readRefundLedger(parseRefundUri(uri("0.95")), station)).toMatchObject({ state: "ok", left: "1" });
+      expect(await readRefundLedger(parseRefundUri(uri("0.95")), station)).toMatchObject({ state: "ok", total: "1" });
       expect(urls[0]).toBe(`https://horizon.stellar.org/accounts/${PUBLIC_HOST}/payments?join=transactions&order=desc&limit=200`);
       // A full page each time: it stops after LEDGER_PAGES, and says it did not read them all.
       stubHorizon(Array.from({ length: 200 }, () => op(SPAMMER, PUBLIC_HOST, "0.0001000", null)));
@@ -428,8 +444,18 @@ describe("the refund transaction", () => {
     const r = parseRefundUri(uri("2.5000001"));
     const err = await sendRefund(r, hosted).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LedgerBlockError);
-    expect(err).toMatchObject({ check: { state: "more_than_paid", left: "2.5" } });
+    expect(err).toMatchObject({ check: { state: "more_than_paid", total: "2.5" } });
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`/accounts/${host.publicKey()}/payments?join=transactions`), expect.anything());
+    expect(Horizon.Server.prototype.loadAccount).not.toHaveBeenCalled();
+    expect(freighter.signTransaction).not.toHaveBeenCalled();
+    expect(submitted).toEqual([]);
+  });
+
+  it("signs nothing when Horizon already lists this refund, paid from anywhere", async () => {
+    const r = parseRefundUri(uri());
+    // Paid a minute ago, say from the phone's QR, while this page was open and its first check said ok.
+    stubHorizon([op(host.publicKey(), PAYER, "2.5000000", "refund 8DY7RJ.FAFXJXBZ"), op(PAYER, host.publicKey(), "2.5000000", "8DY7RJ.FAFXJXBZ")]);
+    await expect(sendRefund(r, hosted)).rejects.toMatchObject({ name: "LedgerBlockError", check: { state: "refunded", refunded: "2.5" } });
     expect(Horizon.Server.prototype.loadAccount).not.toHaveBeenCalled();
     expect(freighter.signTransaction).not.toHaveBeenCalled();
     expect(submitted).toEqual([]);
@@ -486,7 +512,7 @@ describe("the /refund page", () => {
 
   it("has every message it shows, in every language", () => {
     const states = ["no_station", "no_registry", "unknown_station", "inactive", "custody", "asset_mismatch", "over_cap"];
-    const ledger = ["no_payment", "more_than_paid"];
+    const ledger = ["no_payment", "more_than_paid", "refunded"];
     const keys = [
       ...states.map((s) => `block.${s}`),
       ...ledger.map((s) => `ledger.${s}`),

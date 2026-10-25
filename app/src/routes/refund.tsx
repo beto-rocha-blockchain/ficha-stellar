@@ -5,8 +5,9 @@
  * Ficha wallet and no PIN, since the host signs with its own account. The
  * network is the URI's, not the app's setting; the station in the memo must
  * be in that network's signed registry, the destination must have paid the
- * host at least the amount under REF (the host's payments on the ledger,
- * read on load and again right before building), Freighter must be on that
+ * host at least the amount under REF and been sent no refund with its memo
+ * yet (the host's payments on the ledger, read on load and again right
+ * before building), Freighter must be on that
  * network with the station's host_key, and the destination is shown in full
  * before signing. An unknown outcome is never sent again from here.
  */
@@ -160,7 +161,9 @@ function ledgerBlock(c: Exclude<LedgerCheck, { state: "ok" }>, r: RefundRequest,
         .filter(Boolean)
         .join(" ");
     case "more_than_paid":
-      return t("ledger.more_than_paid", { amount: formatAmount(r.amount, lang, 7, 0), left: formatAmount(c.left, lang, 7, 0), code, ref: r.refText });
+      return t("ledger.more_than_paid", { amount: formatAmount(r.amount, lang, 7, 0), total: formatAmount(c.total, lang, 7, 0), code, ref: r.refText });
+    case "refunded":
+      return t("ledger.refunded", { refunded: formatAmount(c.refunded, lang, 7, 0), code, memo: r.req.memo });
     default: {
       const unknown: never = c;
       void unknown;
@@ -193,7 +196,7 @@ function PaymentRows({ title, payments, net }: { title: string; payments: HostPa
   );
 }
 
-function LedgerFound({ r, paid, refunds }: { r: RefundRequest; paid: HostPayment[]; refunds: HostPayment[] }) {
+function LedgerFound({ r, paid, refunds = [] }: { r: RefundRequest; paid: HostPayment[]; refunds?: HostPayment[] }) {
   const t = useT("refund");
   return (
     <div className="space-y-2">
@@ -256,7 +259,7 @@ function LedgerView({ r, station }: { r: RefundRequest; station: Station }) {
       <>
         <Blocked text={ledgerBlock(check, r, station, lang, t)} />
         <RefundFacts r={r} stationName={station.name} />
-        {check.state !== "no_payment" && <LedgerFound r={r} paid={check.paid} refunds={check.refunds} />}
+        {check.state !== "no_payment" && <LedgerFound r={r} paid={check.paid} refunds={check.state === "refunded" ? check.refunds : []} />}
       </>
     );
   }
@@ -267,9 +270,9 @@ function LedgerView({ r, station }: { r: RefundRequest; station: Station }) {
       <div className="space-y-2 rounded-md border border-success/40 bg-success/10 px-3 py-2">
         <p className="flex items-start gap-2 text-[12px] font-medium">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-          {t("ledger.ok", { left: formatAmount(check.left, lang, 7, 0), code: r.req.asset.code })}
+          {t("ledger.ok", { total: formatAmount(check.total, lang, 7, 0), code: r.req.asset.code, memo: r.req.memo })}
         </p>
-        <LedgerFound r={r} paid={check.paid} refunds={check.refunds} />
+        <LedgerFound r={r} paid={check.paid} />
       </div>
       <SignRefund r={r} station={station} onBlocked={(check) => setLedger({ state: "done", check })} />
     </>
