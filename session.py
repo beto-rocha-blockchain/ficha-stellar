@@ -59,10 +59,12 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Callable
+
+from stellar_sdk import StrKey
 
 from config import CLAIM_WINDOW_SECONDS, STELLAR_DECIMALS, Config
 from escrow import (
@@ -72,7 +74,10 @@ from escrow import (
 from escrow import deadline as escrow_deadline
 from meter import Reading, plugged
 from relay import Relay
-from stellar import Payment, format_amount, memo_station, new_session_id, payment_key, session_memo
+from stellar import (
+    Payment, format_amount, memo_station, new_session_id, payment_key, refund_memo, refund_tx_ref, refund_uri,
+    session_memo,
+)
 
 log = logging.getLogger("ficha.session")
 
@@ -111,6 +116,10 @@ REASONS = {
 }
 
 STROOP = Decimal(1).scaleb(-STELLAR_DECIMALS)  # the smallest amount on the ledger
+
+# Direct mode: the lines whose "refunds" the host owes (a "finished" line's
+# are its session line's, which follows it).
+REFUND_KINDS = ("session", "orphan", "refused", "underpaid")
 
 # Custody: how many pay links shown and never paid the station remembers. A
 # deposit made later with one of them is refunded in full (its c[0]). As many
@@ -163,6 +172,12 @@ def amount_str(value: Decimal | None) -> str | None:
     return None if value is None else format(value.quantize(STROOP, rounding=ROUND_HALF_UP), "f")
 
 
+def is_account(key) -> bool:
+    """A Stellar account ID (G...): only one can be refunded. A debug
+    payment's made-up payer ("DEBUG-PAYER") is owed nothing on the ledger."""
+    return isinstance(key, str) and StrKey.is_valid_ed25519_public_key(key)
+
+
 class SessionLog:
     """sessions.jsonl, append only. Lines by kind:
       credited    a payment credited to a session, written the moment it is
@@ -176,6 +191,9 @@ class SessionLog:
       orphan, underpaid, refused   payments that were not credited
       free_grant  a device's free emergency minutes (WIFI_PORTAL): its id of
                   the day, what, seconds, when; never its MAC or IP
+    Direct mode: a paid session line, and each orphan, refused and underpaid
+    line, carries "refunds", what the host owes back and to whom, each with
+    the SEP-0007 URI that pays it (Station._session_refunds()); dust never.
     Custody mode adds:
       seed        a session's hash chain seed, before its pay link shows
       consumed    a running session's consumed time, every CHECKPOINT_SECONDS
@@ -408,6 +426,9 @@ class Station:
         # Records not on disk yet (the write failed); retried each tick.
         self.pending: list[dict] = []
         self._flush_error: str | None = None
+        # Direct mode: the refunds the host still owes, oldest first, from
+        # the log: {"ref", "payer", "asset", "asset_issuer", "left"} (_owe()).
+        self.refunds_due: list[dict] = []
         self._recover()
 
         self.state = State.AWAITING_PAYMENT
@@ -485,6 +506,9 @@ class Station:
                 elif kind in ("session", "unserved") and r.get("id"):
                     served = kind == "session"
                     receipts.append((first_credit.get(r["id"], pos) if served else pos, pos, r, served))
+            # Direct mode: the refunds due, in the order they became due.
+            if kind in REFUND_KINDS and isinstance(r.get("refunds"), list):
+                self._owe(r["refunds"])
         end = len(lines)
 
         for sid, pays in credited.items():
@@ -498,7 +522,11 @@ class Station:
                 record["transitions"] = list(record.get("transitions") or []) + [["RECOVERED", now]]
                 record["cut_confirmation"] = cuts.get(sid) or record.get("cut_confirmation") or {
                     "confirmed": False, "reason": "station stopped before the cut was confirmed"}
+                if not self.cfg.custody:
+                    record["refunds"] = self._session_refunds(
+                        sid, record.get("payments") or [], record.get("capped_seconds"), record.get("unused_seconds"))
                 self._record(record)
+                self._owe(record.get("refunds") or [])
                 self.closed_ids.add(sid)
                 if isinstance(record.get("custody"), dict):
                     receipts.append((first_credit[sid], end, record, True))
@@ -541,6 +569,8 @@ class Station:
                 "probes": None,
                 "refund_hint": {"change": amount_str(change), "capped": None, "unused": None,
                                 "asset": first.get("asset")},
+                # Direct mode: each payer's change only, the rest being unknown.
+                **({"refunds": self._session_refunds(sid, payments, None, None)} if not self.cfg.custody else {}),
                 "courtesy_used": None,
                 # The peak is unknown. The one reading on disk is the first at
                 # or above MIN_CURRENT_MA, which is what makes it "delivered".
@@ -565,6 +595,7 @@ class Station:
                               refund_hint=self._hint(custody), custody=custody)
                 receipts.append((first_credit[sid], end, record, True))
             self._record(record)
+            self._owe(record.get("refunds") or [])
             self.closed_ids.add(sid)
             log.warning("session %s was interrupted (station stopped mid-session); %s", sid,
                         "its receipt refunds the time after the last checkpoint" if custody
@@ -805,6 +836,8 @@ class Station:
 
     def _log_uncredited(self, p: Payment, kind: str, reason: str, custody: dict | None = None) -> None:
         log.warning("%s payment %s: %s", kind, p.tx_hash, reason)
+        # Direct mode: owed back in full, to its own payer. Dust never is.
+        refunds = None if self.cfg.custody or kind == "dust" else self._uncredited_refunds(p)
         self.log.write({
             "kind": kind,
             "reason": reason,
@@ -823,9 +856,11 @@ class Station:
             # A deposit: the session's totals on the contract after it (and,
             # when it is refunded in full, the proof that does it).
             **({"custody": custody} if custody else {}),
+            **({"refunds": refunds} if refunds is not None else {}),
         })
         # On disk: never logged twice, whatever happens after (on_deposit).
         self.handled.add(payment_key(p.tx_hash, p.op_id))
+        self._owe(refunds or [])
 
     def _credit(self, p: Payment, fichas: int, deposit: Deposit | None = None) -> None:
         s = self.session
@@ -919,6 +954,70 @@ class Station:
         if s.run_since is not None:
             s.consumed_base = s.consumed(max(at, s.run_since))
             s.run_since = None
+
+    # -- direct mode: what the host owes back ------------------------------------
+    # The station holds no key and cannot refund: the host pays each refund
+    # due from its own wallet. What is due, and to whom, comes from this log
+    # only, never from a wallet's history, where a look-alike address may
+    # have sent the host a tiny payment exactly to be copied (address
+    # poisoning). Custody mode refunds by proof instead (section 7).
+    def _station_asset(self) -> tuple[str, str | None]:
+        """The station's asset as (code, issuer), issuer None for native XLM."""
+        return self.cfg.asset_label, None if self.cfg.is_native else self.cfg.asset_issuer
+
+    def _refund_due(self, payer: str, amount: Decimal, ref: str, asset: str, issuer: str | None) -> dict:
+        """One refund due as a log line keeps it, with the SEP-0007 URI that pays it."""
+        return {"payer": payer, "amount": format_amount(amount), "asset": asset,
+                **({"asset_issuer": issuer} if issuer else {}), "ref": ref, "memo": refund_memo(ref),
+                "uri": refund_uri(self.cfg, payer, amount, ref, asset, issuer)}
+
+    def _session_refunds(self, sid: str, payments: list[dict], capped: int | None,
+                         unused: int | None) -> list[dict]:
+        """What a closed session owes each of its payers: the change of their
+        own credited lines, and their share of the time paid and not
+        delivered (capped and unused, at this station's price, as
+        refund_hint), split by what each had credited. Each rounded down to
+        the stroop, so together they never exceed what is due. An
+        interrupted session (unused None: unknown) owes the change only."""
+        lost = Decimal(0) if unused is None else self._time_value(int(capped or 0) + int(unused))
+        change: dict[str, Decimal] = {}
+        credit: dict[str, Decimal] = {}
+        for p in payments:
+            payer = p.get("payer")
+            c = Decimal(str(p["change_due"])) if p.get("change_due") is not None else Decimal(0)
+            change[payer] = change.get(payer, Decimal(0)) + c
+            credit[payer] = credit.get(payer, Decimal(0)) + Decimal(str(p.get("amount") or 0)) - c
+        total = sum(credit.values(), Decimal(0))
+        asset, issuer = self._station_asset()
+        out = []
+        for payer, c in change.items():
+            due = (c + (lost * credit[payer] / total if total > 0 else 0)).quantize(STROOP, rounding=ROUND_DOWN)
+            if due > 0 and is_account(payer):
+                out.append(self._refund_due(payer, due, sid, asset, issuer))
+        return out
+
+    def _uncredited_refunds(self, p: Payment) -> list[dict]:
+        """An orphan, refused or underpaid payment is owed back in full, to
+        its own payer, in the asset it came in. Its REF is the session its
+        memo names, if that is one of this station's, else its transaction."""
+        named = p.memo is not None and (p.memo == self.session.id or p.memo in self.closed_ids)
+        ref = p.memo if named else refund_tx_ref(self.cfg, p.tx_hash)
+        asset, issuer = (p.asset, p.asset_issuer or None) if p.wrong_asset else self._station_asset()
+        due = p.amount.quantize(STROOP, rounding=ROUND_DOWN)
+        return [self._refund_due(p.payer, due, ref, asset, issuer)] if due > 0 and is_account(p.payer) else []
+
+    def _owe(self, refunds: list) -> None:
+        """These refunds are due now, oldest first: the screen shows the
+        newest until the host pays it."""
+        for r in refunds:
+            try:
+                entry = {"ref": str(r["ref"]), "payer": r["payer"], "asset": str(r["asset"]),
+                         "asset_issuer": r.get("asset_issuer") or None, "left": Decimal(str(r["amount"]))}
+            except (KeyError, TypeError, AttributeError, ArithmeticError):
+                log.warning("a refund due in the log is unreadable; skipped: %r", r)
+                continue
+            if entry["left"] > 0 and is_account(entry["payer"]):
+                self.refunds_due.append(entry)
 
     # -- custody: the contract's events ----------------------------------------
     def on_escrow(self, ev: Deposit | Settle | Gone) -> None:
@@ -2062,6 +2161,9 @@ class Station:
                 "unused": amount_str(self._time_value(s.unused_seconds)),
                 "asset": self.cfg.asset_label,
             },
+            # Direct mode: what the host owes each payer, and the URI that pays it.
+            **({"refunds": self._session_refunds(s.id, s.payments, s.capped_seconds, s.unused_seconds)}
+               if not self.cfg.custody and s.paid else {}),
             "courtesy_used": s.courtesy_used,
             "courtesy_max_ma": s.courtesy_max_ma,
             "courtesy_wh": round(s.courtesy_wh, 4),
@@ -2086,6 +2188,7 @@ class Station:
         s.logged = True
         record = self._session_record()
         self._record(record)
+        self._owe(record.get("refunds") or [])
         # Custody: the receipt waits on the waiting screen, smaller, until the
         # session settles or its deadline passes (section 7.5).
         if record.get("custody") and not s.settled and (s.id, b64url(s.anchor)) not in self.settled_keys:

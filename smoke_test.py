@@ -59,7 +59,8 @@ from qr import last_receipt_qr, pay_qr, receipt_payload, receipt_qr, wifi_payloa
 from relay import MockRelay
 from session import SessionLog, State, Station, mmss
 from stellar import (
-    HorizonWatcher, Payment, refund_memo, refund_ref_of, refund_tx_ref, refund_uri, sep7_msg, sep7_uri, validate_memo,
+    HorizonWatcher, Payment, format_amount, refund_memo, refund_ref_of, refund_tx_ref, refund_uri, sep7_msg, sep7_uri,
+    validate_memo,
 )
 from supervisor import end_process
 from tools import registry
@@ -1271,6 +1272,117 @@ def test_refund_uri(tmp: Path) -> None:
     check(refund_ref_of("refund 8DY7RJ.FAFXJXBZ") == "8DY7RJ.FAFXJXBZ"
           and all(refund_ref_of(m) is None for m in (None, "", "refund ", "8DY7RJ.FAFXJXBZ", "Refund 8DY7RJ.F")),
           "a refund's memo is exactly 'refund <REF>'")
+
+
+def paid_by(r: Rig, payer: str, amount: str, memo: str | None = "current", **kw) -> Payment:
+    """A payment from `payer` as Horizon hands it over, with a hash of its own."""
+    r.n += 1
+    memo = r.st.session.id if memo == "current" else memo
+    p = Payment(f"{r.n:08x}" + "ab" * 28, "op", payer, Decimal(amount), kw.pop("asset", "XLM"), memo, "", "horizon",
+                **kw)
+    r.st.on_payment(p)
+    return p
+
+
+def owed(st: Station) -> list[tuple[str, str, str, str]]:
+    """The refunds a station still owes: (ref, payer, amount left, asset)."""
+    return [(e["ref"], e["payer"], format_amount(e["left"]), e["asset"]) for e in st.refunds_due]
+
+
+def test_refunds_due(tmp: Path) -> None:
+    print("direct mode: what the host owes each payer, from the log, until paid")
+    a, b = account(1), account(2)
+    (tmp / "split").mkdir()
+    r = Rig(tmp / "split", station_id="K7M2QX", cursor_dir=tmp / "split")
+    st = r.st
+    sid = st.session.id
+    paid_by(r, a, "1.7")  # 1 ficha, 0.7 change
+    paid_by(r, b, "1.25")  # 1 ficha, 0.25 change
+    paid_by(r, b, "1")  # 1 more ficha: b has 2 of the session's 3
+    r.tick(100)
+    st.end_session()  # 800 s of 900 unused: 2.6666666... XLM at 1 XLM per 5 min
+    check(st.refunds_due == [] and "refunds" in r.records()[-1] and r.records()[-1]["kind"] == "finished",
+          "the finished line already says the refunds; nothing is due before the session line")
+    r.tick(r.cfg.finished_seconds)
+    rec = last_session(r)
+    exact = Decimal("0.95") + Decimal(800) / 300
+    got = [(x["payer"], x["amount"], x["asset"], x["ref"], x["memo"]) for x in rec["refunds"]]
+    check(got == [(a, "1.5888888", "XLM", sid, f"refund {sid}"), (b, "2.0277777", "XLM", sid, f"refund {sid}")]
+          and sum(Decimal(x["amount"]) for x in rec["refunds"]) <= exact,
+          "two payers: each one's own change plus its share of the unused time by what it credited (1 and 2 of 3 "
+          "fichas), rounded down to the stroop (1.5888888, 2.0277777): together never above what is due")
+    check(all(x["uri"] == refund_uri(r.cfg, x["payer"], Decimal(x["amount"]), sid) and "asset_issuer" not in x
+              for x in rec["refunds"])
+          and query(rec["refunds"][0]["uri"])["network_passphrase"] == config.NETWORK_PASSPHRASES["testnet"],
+          "each refund has its SEP-0007 URI (testnet: with the passphrase); native XLM has no issuer")
+    check(owed(st) == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM")],
+          "both are pending in the station, oldest first")
+
+    paid_by(r, a, "1", memo=None)
+    tx_ref = f"K7M2QX.tx{r.n:08x}"
+    paid_by(r, b, "0.5")
+    underpaid = st.session.id
+    paid_by(r, a, "0.0001000", memo=None)  # a look-alike's poisoning payment
+    paid_by(r, b, "0.3", memo=sid)
+    paid_by(r, a, "2", asset="USDC", wrong_asset=True, asset_issuer=HOST)
+    r.pay("1", memo=None)  # GPAYER: not an account the ledger knows
+    lines = r.records()[-6:]
+    check([(x["kind"], [(y["payer"], y["amount"], y["ref"]) for y in x["refunds"]] if "refunds" in x else None)
+           for x in lines]
+          == [("orphan", [(a, "1", tx_ref)]), ("underpaid", [(b, "0.5", underpaid)]), ("dust", None),
+              ("orphan", [(b, "0.3", sid)]), ("refused", [(a, "2", underpaid)]), ("orphan", [])],
+          "uncredited lines owe their whole amount to their own payer: an orphan naming no session as "
+          "<STATION_ID>.tx<hash>, an underpaid one or one after its session closed as that session; dust has no "
+          "refunds at all; a payer that is no account gets none")
+    usdc = lines[4]["refunds"][0]
+    check(usdc["asset"] == "USDC" and usdc["asset_issuer"] == HOST
+          and usdc["uri"] == refund_uri(r.cfg, a, Decimal(2), underpaid, "USDC", HOST),
+          "a payment in another asset is owed back in that asset (code and issuer)")
+    before = owed(st)
+    check(before == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM"), (tx_ref, a, "1", "XLM"),
+                     (underpaid, b, "0.5", "XLM"), (sid, b, "0.3", "XLM"), (underpaid, a, "2", "USDC")],
+          "pending: the session's two and the four uncredited ones, never the dust")
+    st2 = r.station(MockRelay())
+    check(owed(st2) == before and st2.refunds_due[-1]["asset_issuer"] == HOST,
+          "after a restart the station owes exactly the same, rebuilt from the log")
+
+    (tmp / "cut").mkdir()
+    r = Rig(tmp / "cut", station_id="K7M2QX", cursor_dir=tmp / "cut")
+    paid_by(r, a, "1.7")
+    paid_by(r, b, "2.4")
+    sid = r.st.session.id
+    r.tick(5)
+    st2 = r.station(MockRelay())  # killed mid-session
+    rec = last_session(r)
+    check(rec["end_reason"] == "interrupted"
+          and [(x["payer"], x["amount"]) for x in rec["refunds"]] == [(a, "0.7"), (b, "0.4")]
+          and owed(st2) == [(sid, a, "0.7", "XLM"), (sid, b, "0.4", "XLM")],
+          "an interrupted session (unused time unknown) owes each payer its change only, pending at once")
+    check(owed(r.station(MockRelay())) == owed(st2), "... and once only, after another restart")
+
+    (tmp / "full").mkdir()
+    r = Rig(tmp / "full", cursor_dir=tmp / "full")
+    paid_by(r, a, "1")
+    r.tick(300)
+    r.tick(r.cfg.finished_seconds)
+    check(last_session(r)["refunds"] == [] and r.st.refunds_due == [],
+          "a session that charged all its paid time, with no change, owes nothing")
+
+    (tmp / "pub").mkdir()
+    r = Rig(tmp / "pub", cursor_dir=tmp / "pub")
+    r.cfg = on_public(r.cfg, cursor_dir=tmp / "pub")
+    r.st = r.station(r.relay, r.log)
+    paid_by(r, a, "1", memo=None)
+    check("network_passphrase" not in query(r.records()[-1]["refunds"][0]["uri"])
+          and r.records()[-1]["refunds"][0]["ref"] == f"K7M2QX.tx{r.n:08x}",
+          "the public network: the same refunds, their URIs without network_passphrase")
+
+    r = custody_rig(tmp / "custody")
+    deposit(r, 2)
+    r.pay("1")  # a classic payment to a custody station: refused
+    finish_e(r, 30)
+    check(not any("refunds" in x for x in r.records()) and r.st.refunds_due == [],
+          "custody unchanged: no refunds in its lines, nothing pending (the receipt's proof refunds)")
 
 
 # The network each of SDF's Horizons says it serves, at its root.
@@ -4715,7 +4827,8 @@ def test_free_rollover(tmp: Path) -> None:
 if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
-             ("i", test_money), ("i2", test_refund_uri), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
+             ("i", test_money), ("i2", test_refund_uri), ("i3", test_refunds_due), ("j", test_robustness),
+             ("k", test_screens), ("l", test_wrong_asset),
              ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
              ("m4", test_horizon_network), ("m5", test_public_rechecks),
              ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
