@@ -834,6 +834,16 @@ def test_public(tmp: Path) -> None:
     main_py = (root / "main.py").read_text(encoding="utf-8")
     check("registry_health = registry_check.startup(cfg)" in main_py, "main.py checks the registry with startup()")
 
+    html = (root / "static" / "index.html").read_text(encoding="utf-8")
+    on_card = re.search(r'<img id="qr" alt="Payment QR code"></div>\s*<div class="mainnet" id="mainnet" role="note">'
+                        r'<span class="k">mainnet</span><span>real <span id="mainnetasset">XLM</span></span></div>\s*'
+                        r'</figure>', html)
+    check(on_card is not None and 'if (d.network === "public") body.classList.add("public");' in html
+          and '$("mainnetasset").textContent = d.asset;' in html and "body.public .mainnet { display: flex; }" in html
+          and ".mainnet { display: none;" in html,
+          "the screen on the public network: a MAINNET banner on the pay QR's card, 'real XLM' (the station's asset); "
+          "it goes with the card (no pay QR, no banner), and testnet shows none")
+
 
 def test_horizon_public(tmp: Path) -> None:
     print("the public network: no pay QR while Horizon is failing")

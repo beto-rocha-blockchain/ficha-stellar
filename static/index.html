@@ -229,6 +229,19 @@
                   border-radius: var(--radius-xl); padding: 0.45em 1em; }
   /* At the session limit no whole ficha fits: a payment would buy no energy. */
   body.full .qrs, body.full .pricenote { display: none; }
+  /* The public network: the pay QR spends real money. Said on its card in
+     large type, not only by the footer's small MAINNET badge, in the app's
+     warning callout (its Mainnet notice next to the pay button). It goes
+     with the card: no pay QR, no banner. */
+  .mainnet { display: none; flex-wrap: wrap; align-items: baseline; justify-content: center; column-gap: 0.45em; width: 0; min-width: 100%;
+             padding: calc(0.35 * var(--u)) calc(0.6 * var(--u)); border: 1px solid rgb(var(--warning-rgb) / .5); border-radius: var(--radius);
+             background: rgb(var(--warning-rgb) / .1); color: var(--warning); font-size: clamp(1.1rem, 2 * var(--u), 2.6rem); font-weight: 700;
+             letter-spacing: -0.02em; line-height: 1.15; text-align: center; }
+  .mainnet .k { font-family: var(--font-mono); font-weight: 500; font-size: 0.6em; letter-spacing: 0.14em; text-transform: uppercase; }
+  body.public .mainnet { display: flex; }
+  /* Smaller cards, smaller type: one line where it fits. */
+  body.s-CHARGING .mainnet { font-size: clamp(1rem, 1.6 * var(--u), 2.1rem); }
+  body.two-qr .mainnet { font-size: clamp(0.95rem, 1.35 * var(--u), 1.75rem); }
   .cta { font-size: clamp(1.6rem, 3 * var(--u), 3.8rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; text-align: center; white-space: nowrap; }
   body.big-qr .cta { font-size: clamp(1.8rem, 3.3 * var(--u), 4.2rem); }
   .price { font-size: clamp(1.1rem, 2 * var(--u), 2.6rem); color: var(--muted-foreground); text-align: center; white-space: nowrap; }
@@ -317,6 +330,19 @@
     body.sos-on.big-qr .qrbox img { width: min(60vw, 30vh); }
     body.sos-on.two-qr .qrbox img { width: min(40vw, 22vh); }
     body.sos-on.s-CHARGING .qrbox img { width: min(34vw, 20vh); }
+  }
+  /* The MAINNET banner takes a line of the pay card too. Two QRs or one
+     while charging have the room; one big QR gives it back, and with the
+     emergency band its banner type shrinks to stay on one line. */
+  @media (min-aspect-ratio: 1/1) {
+    body.public.big-qr:not(.two-qr) .qrbox img { width: min(30vw, 31vh); }
+    body.public.sos-on.big-qr:not(.two-qr) .qrbox img { width: min(30vw, 25vh); }
+    body.public.sos-on.big-qr:not(.two-qr) .mainnet { font-size: clamp(1rem, 1.75 * var(--u), 2.3rem); }
+  }
+  /* Portrait: the QR is far wider than the banner's line, and the height has
+     room: larger. */
+  @media (max-aspect-ratio: 1/1) {
+    body.public .qrcard .mainnet { font-size: clamp(1.1rem, 3.4 * var(--u), 3rem); }
   }
 
   /* footer: one line, always, for the same reason. Each health item gets the
@@ -433,6 +459,7 @@
       <figure class="qrcard">
         <figcaption><span class="step">2</span> Pay</figcaption>
         <div class="qrbox"><img id="qr" alt="Payment QR code"></div>
+        <div class="mainnet" id="mainnet" role="note"><span class="k">mainnet</span><span>real <span id="mainnetasset">XLM</span></span></div>
       </figure>
     </div>
     <div class="price" id="price"></div>
@@ -589,6 +616,9 @@
     if (d.last_receipt) body.classList.add("has-last");
     if (d.mock) body.classList.add("mock");
     if (d.delivering) body.classList.add("delivering");
+    // The public network: the pay QR spends real money (MAINNET banner).
+    if (d.network === "public") body.classList.add("public");
+    $("mainnetasset").textContent = d.asset;
     // A payment now would buy no energy: refused while the relay is not
     // answering, neither credited nor logged while the log cannot be
     // written. No pay QR is shown in any state.
