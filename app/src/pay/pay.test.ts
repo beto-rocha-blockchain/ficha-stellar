@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "@/config";
 import type { Registry } from "@/registry/verify";
-import { checkAgainstRegistry, fichasLeft, fichasPaid } from "./check";
+import { blockFor, checkAgainstRegistry, fichasLeft, fichasPaid, type Check } from "./check";
 import { classifyQr, linkRoute } from "./qr";
 import { estimatedEnd, formatMmss } from "./format";
 import {
@@ -152,6 +152,29 @@ describe("QR against the signed registry", () => {
     expect(at(STATION_URI)).toEqual({ state: "custody_only", stationId: "ERZGCG" });
     // A legacy QR to its host key is not the custody station's (it always has an ID).
     expect(at(STATION_URI.replace("ERZGCG.F3H9TXAB", "F3H9TXAB"))).toEqual({ state: "legacy", station: null });
+  });
+
+  it("blocks every checked state but ok and a testnet legacy QR with a station or an amount (fails closed)", () => {
+    const req = parseSep7Pay(STATION_URI);
+    const bare = parseSep7Pay(STATION_URI.replace("amount=1&", "").replace("ERZGCG.F3H9TXAB", "F3H9TXAB"));
+    expect(blockFor({ state: "ok", station }, req)).toBeNull();
+    expect(blockFor({ state: "legacy", station }, req)).toBeNull();
+    expect(blockFor({ state: "legacy", station: null }, req)).toBeNull();
+    expect(blockFor({ state: "legacy", station: null }, bare)).toEqual({ key: "pay.notFicha" });
+    const blocked: Check[] = [
+      { state: "wrong_network" },
+      { state: "mismatch", stationId: "ERZGCG" },
+      { state: "asset_mismatch", station },
+      { state: "price_mismatch", station },
+      { state: "unknown_station", stationId: "K7M2QX" },
+      { state: "inactive", stationId: "ERZGCG" },
+      { state: "custody_only", stationId: "ERZGCG" },
+      { state: "no_registry", stationId: "ERZGCG" },
+      { state: "no_station_code" },
+    ];
+    for (const c of blocked) expect(blockFor(c, req), c.state).not.toBeNull();
+    // A state this version does not know is blocked too.
+    expect(blockFor({ state: "from_a_newer_check" } as unknown as Check, req)).toEqual({ key: "pay.notFicha" });
   });
 
   it("blocks another destination or asset, and unknown stations", () => {

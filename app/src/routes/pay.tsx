@@ -33,7 +33,7 @@ import { RequireUnlocked } from "@/components/RequireUnlocked";
 import { useAccountSummary } from "@/hooks/useAccountSummary";
 import { ActivateTestnet } from "@/components/ActivateTestnet";
 import { useLang, useT } from "@/i18n";
-import { checkAgainstRegistry, fichasLeft, fichasPaid } from "@/pay/check";
+import { blockFor, checkAgainstRegistry, fichasLeft, fichasPaid } from "@/pay/check";
 import { formatTimeOfDay } from "@/lib/format";
 import { estimatedEnd } from "@/pay/format";
 import { fetchMyPayments, fetchSessionPayments, othersFor, paymentsFor, type HostPayment, type MyPayment } from "@/pay/history";
@@ -207,21 +207,8 @@ function PayForm({ req, memo }: { req: PayRequest; memo: FichaMemo }) {
   const check = checkAgainstRegistry(req, memo, reg.registry, net);
   const station = check.state === "ok" || check.state === "legacy" ? check.station : null;
 
-  let blockedText: string | null = null;
-  if (check.state === "wrong_network") blockedText = t("pay.wrongNetwork");
-  if (check.state === "mismatch") blockedText = t("pay.mismatch", { id: check.stationId });
-  if (check.state === "asset_mismatch") blockedText = t("pay.assetMismatch", { id: check.station.id, code: req.asset.code, expected: check.station.asset.code });
-  if (check.state === "price_mismatch") {
-    const code = req.asset.code;
-    blockedText = t("pay.priceDiffers", { id: check.station.id, qr: `${req.amount} ${code}`, reg: `${check.station.ficha_price} ${code}` });
-  }
-  if (check.state === "unknown_station") blockedText = t("pay.unknownStation", { id: check.stationId });
-  if (check.state === "inactive") blockedText = t("pay.inactive", { id: check.stationId });
-  if (check.state === "custody_only") blockedText = t("pay.custodyOnly", { id: check.stationId });
-  if (check.state === "no_registry") blockedText = t("pay.noRegistry");
-  if (check.state === "no_station_code") blockedText = t("pay.noStationCode");
-  // Legacy without a registry match (testnet only): only the QR's own amount, one ficha.
-  if (check.state === "legacy" && !station && !req.amount) blockedText = t("pay.notFicha");
+  const block = blockFor(check, req);
+  let blockedText: string | null = block ? t(block.key, block.vars) : null;
   if (!blockedText && ended) blockedText = t("pay.sessionEnded");
 
   const earlier = paid.state === "ok" ? paid.payments : [];

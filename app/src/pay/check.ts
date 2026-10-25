@@ -68,6 +68,48 @@ export function checkAgainstRegistry(req: PayRequest, memo: FichaMemo, reg: Regi
   return { state: "ok", station: st };
 }
 
+/** Why the pay screen blocks a payment: the message key and its values. */
+export type Block = { key: string; vars?: Record<string, string> };
+
+/**
+ * Whether a checked QR may be paid. Only "ok" and a testnet "legacy" with a
+ * station or an amount go ahead; every other state blocks. The switch is
+ * exhaustive, so a state added to Check and not decided here fails the
+ * typecheck, and an unknown state at runtime blocks (fails closed).
+ */
+export function blockFor(check: Check, req: PayRequest): Block | null {
+  switch (check.state) {
+    case "ok":
+      return null;
+    case "legacy":
+      // Legacy without a registry match (testnet only): only the QR's own amount, one ficha.
+      return !check.station && !req.amount ? { key: "pay.notFicha" } : null;
+    case "wrong_network":
+      return { key: "pay.wrongNetwork" };
+    case "mismatch":
+      return { key: "pay.mismatch", vars: { id: check.stationId } };
+    case "asset_mismatch":
+      return { key: "pay.assetMismatch", vars: { id: check.station.id, code: req.asset.code, expected: check.station.asset.code } };
+    case "price_mismatch":
+      return { key: "pay.priceDiffers", vars: { id: check.station.id, qr: `${req.amount} ${req.asset.code}`, reg: `${check.station.ficha_price} ${req.asset.code}` } };
+    case "unknown_station":
+      return { key: "pay.unknownStation", vars: { id: check.stationId } };
+    case "inactive":
+      return { key: "pay.inactive", vars: { id: check.stationId } };
+    case "custody_only":
+      return { key: "pay.custodyOnly", vars: { id: check.stationId } };
+    case "no_registry":
+      return { key: "pay.noRegistry" };
+    case "no_station_code":
+      return { key: "pay.noStationCode" };
+    default: {
+      const unknown: never = check;
+      void unknown;
+      return { key: "pay.notFicha" };
+    }
+  }
+}
+
 /** Fichas the station credited for these payments: it floors each payment on its own. */
 export function fichasPaid(payments: Pick<MyPayment, "amount">[], fichaPrice: string): number {
   const price = toStroops(fichaPrice);
