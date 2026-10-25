@@ -978,6 +978,88 @@ def test_horizon_network(tmp: Path) -> None:
                 "takes http://localhost:8000)")
 
 
+def test_public_rechecks(tmp: Path) -> None:
+    print("the public network: a direct station reads its registry entry again while it runs")
+    root = Path(__file__).resolve().parent
+    kp = Keypair.random()
+    doc = dict(json.loads((root / "registry" / "stations.json").read_bytes()), network="public")
+    entry = {k: v for k, v in doc["stations"][0].items() if k not in ("mode",) + registry_format.CUSTODY_FIELDS}
+    entry.update(id="K7M2QX", host_key=HOST)
+
+    def site(**change):
+        raw = json.dumps(dict(doc, stations=[dict(entry, **change)])).encode()
+        return lambda url: (raw, json.dumps(registry.sign_bytes(raw, kp)).encode())
+
+    def offline(url: str):
+        raise registry_check.Unavailable("ConnectError")
+
+    r = Rig(tmp)
+    pub = on_public(r.cfg, registry_key=kp.public_key, registry_file=tmp / "missing.json",
+                    registry_url=config.REGISTRY_SITE + config.REGISTRY_FILES["public"])
+    config.validate(pub)
+    testnet = replace(r.cfg, station_id="K7M2QX", registry_key=kp.public_key, registry_file=tmp / "missing.json")
+    fetched: list[str] = []
+    try:
+        registry_check.recheck(pub, site(ficha_minutes=10))
+        short = ""
+    except registry_check.Mismatch as exc:
+        short = exc.short
+    check(pub.rechecks_registry and not testnet.rechecks_registry
+          and replace(testnet, payment_mode="custody").rechecks_registry
+          and registry_check.recheck(pub, site()) == {"status": "ok", "detail": "site"}
+          and short == "FICHA_MINUTES=5 here, ficha_minutes 10 in the registry"
+          and registry_check.recheck(testnet, lambda url: fetched.append(url)) == {"status": "off",
+                                                                                   "detail": "direct mode"}
+          and fetched == [],
+          "registry_check.recheck: a public direct station is checked again (ficha_minutes 5 -> 10 re-signed: a "
+          "mismatch, short); a direct station on testnet is not re-read")
+
+    main = sys.modules.get("main") or import_main(tmp)
+    st = Station(pub, MockRelay(), SessionLog(tmp / "pub.jsonl"), clock=r.clock, wallclock=r.clock.iso,
+                 unixclock=r.unix)
+    saved = main.cfg, main.station, main.registry_health, registry_check.recheck, escrow.recheck
+    escrow_reads: list[config.Config] = []
+
+    def run(fetch) -> dict:
+        registry_check.recheck = lambda cfg: saved[3](cfg, fetch)
+        asyncio.run(main.recheck_once())
+        r.clock.t += 60
+        return main.snapshot()
+
+    logging.disable(logging.WARNING)
+    try:
+        main.cfg, main.station = pub, st
+        escrow.recheck = lambda cfg, ledger: escrow_reads.append(cfg) or []
+        s = run(site())
+        check(s["out_of_service"] is None and s["registry"] == {"status": "ok", "detail": "site"},
+              "public, direct: a re-read that matches leaves the station in service")
+        s = run(site(ficha_minutes=10))
+        check(s["out_of_service"] == "registry: FICHA_MINUTES=5 here, ficha_minutes 10 in the registry"
+              and s["registry"] == {"status": "mismatch", "detail": "FICHA_MINUTES=5 here, ficha_minutes 10 in the "
+                                                                   "registry"},
+              "public, direct: the registry re-signed with ficha_minutes 10 at the same price: out of service (no pay "
+              "QR), the footer says why")
+        s = run(offline)
+        check(s["out_of_service"] is not None, "a re-read that cannot reach the registry changes nothing")
+        s = run(site())
+        check(s["out_of_service"] is None and escrow_reads == [],
+              "a re-read that matches again: back in service; a direct station's contract is never read")
+    finally:
+        main.cfg, main.station, main.registry_health, registry_check.recheck, escrow.recheck = saved
+        logging.disable(logging.NOTSET)
+
+    import inspect
+    t = Station(testnet, MockRelay(), SessionLog(tmp / "testnet.jsonl"), clock=r.clock)
+    logging.disable(logging.WARNING)
+    try:
+        t.on_recheck("registry", "FICHA_MINUTES=5 here, ficha_minutes 10 in the registry")
+    finally:
+        logging.disable(logging.NOTSET)
+    check(t.out_of_service() is None and "if cfg.rechecks_registry:" in inspect.getsource(main.lifespan),
+          "testnet, direct: unchanged (main.py re-reads the registry only in custody or on public, and a "
+          "mismatch would not hide the pay QR)")
+
+
 def test_receipt(tmp: Path) -> None:
     print("receipt")
     r = Rig(tmp, station_id="K7M2QX", app_url="https://ficha.test")
@@ -4500,7 +4582,7 @@ if __name__ == "__main__":
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
              ("i", test_money), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
              ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
-             ("m4", test_horizon_network),
+             ("m4", test_horizon_network), ("m5", test_public_rechecks),
              ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
              ("q", test_custody_restart), ("r", test_escrow_watch), ("r2", test_escrow_rpc30),
              ("s", test_custody_screens),

@@ -14,12 +14,15 @@ must work offline: the log and the footer say the registry is unchecked. On
 the public network it does not start (startup()): real money is paid only to
 a station the registry vouches for.
 
-A custody station reads the registry again while it runs (recheck(), every
-minute, main.py): the app pays the contract the registry names, so a
-registry published with another `escrow` (a redeploy), other terms or the
-station made inactive would have the app pay where this station never
-looks. On any difference it goes out of service, its pay QR hidden, until it
-matches again: in practice, until it is restarted with the new values.
+A custody station, and any station on the public network, reads the
+registry again while it runs (recheck(), every minute, main.py): the app
+pays as the newest registry says, so a registry published with another
+`escrow` (a redeploy), other terms (ficha_minutes 10 at the same price) or
+the station made inactive would have the app pay where this station never
+looks, or promise what it does not sell. On any difference it goes out of
+service, its pay QR hidden, until it matches again: in practice, until it is
+restarted with the new values. A direct station on testnet is checked at
+startup only.
 """
 
 from __future__ import annotations
@@ -175,8 +178,8 @@ def _check_copy(cfg: Config, source: str, name: str, data: bytes, sig: dict) -> 
 
 
 def check(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url, quiet: bool = False) -> dict:
-    """Check this station against the signed registry: at startup, and, for
-    a custody station, again while it runs (recheck()).
+    """Check this station against the signed registry: at startup, and, in
+    custody or on the public network, again while it runs (recheck()).
 
     Returns the footer's registry health, {"status": ok | unchecked | off,
     "detail": ...}. Raises Mismatch (a ConfigError) when a copy is badly
@@ -251,12 +254,13 @@ def startup(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url
 
 
 def recheck(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url) -> dict:
-    """A custody station, while it runs: the startup check again, in the
-    same order (the site's copy, then the local one), without its log lines.
-    Blocking: main.py runs it in a thread. Returns the health as check()
-    does ("unchecked": no copy could be read now, nothing new); raises
-    Mismatch when the station would no longer start. Direct mode: not
-    re-read (it keeps working exactly as before)."""
-    if not cfg.custody:
+    """A custody station, or any station on the public network, while it
+    runs: the startup check again, in the same order (the site's copy, then
+    the local one), without its log lines. Blocking: main.py runs it in a
+    thread. Returns the health as check() does ("unchecked": no copy could be
+    read now, nothing new); raises Mismatch when the station would no longer
+    start. Direct mode on testnet: not re-read (it keeps working exactly as
+    before)."""
+    if not cfg.rechecks_registry:
         return {"status": "off", "detail": "direct mode"}
     return check(cfg, fetch, quiet=True)

@@ -325,6 +325,14 @@ class Config:
         return self.payment_mode == "custody"
 
     @property
+    def rechecks_registry(self) -> bool:
+        """The station reads its signed registry entry again while it runs
+        (registry_check.recheck(), main.py): in custody, where the app pays the
+        contract the newest registry names, and on the public network, where
+        it promises the newest terms for real money. Testnet direct: startup only."""
+        return self.custody or self.network == "public"
+
+    @property
     def max_fichas(self) -> int:
         """Most fichas one session holds: the contract's max_fichas."""
         return self.max_session_minutes // self.ficha_minutes if self.ficha_minutes > 0 else 0

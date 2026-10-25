@@ -93,10 +93,11 @@ server: uvicorn.Server | None = None
 # A screen that takes longer than this to take one snapshot is dropped.
 SEND_TIMEOUT = 1.0
 _background_tasks: set[asyncio.Task] = set()
-# Custody: how often the registry and the station's terms on the contract are
-# read again while it runs (recheck()). A registry published with another
-# contract makes the app pay where this station never looks: at most this
-# long passes before the pay QR goes.
+# Custody and the public network (cfg.rechecks_registry): how often the
+# registry (and, custody, the station's terms on the contract) are read again
+# while it runs (recheck()). A registry published with another contract or
+# other terms makes the app pay where this station never looks, or promise
+# what it does not sell: at most this long passes before the pay QR goes.
 RECHECK_SECONDS = 60.0
 
 
@@ -132,7 +133,7 @@ def snapshot() -> dict:
         "max_session_minutes": cfg.max_session_minutes,
         "min_current_ma": cfg.min_current_ma,
         "horizon": watcher.health() if watcher else {"status": "off", "detail": "no HOST_PUBLIC_KEY"},
-        # The startup check, or (custody) a later read that no longer matches.
+        # The startup check, or (custody, public) a later read that no longer matches.
         "registry": ({"status": "mismatch", "detail": station.mismatch["registry"]}
                      if "registry" in station.mismatch else registry_health),
         # Custody: the events watcher, the check against the contract (at
@@ -240,11 +241,12 @@ _recheck_ledger = escrow.Ledger(cfg, timeout=escrow.CHECK_TIMEOUT) if cfg.custod
 
 
 async def recheck_once() -> None:
-    """Custody: the signed registry and this station's terms on the contract
-    read again, as at startup (registry_check.recheck, escrow.recheck). What
-    no longer matches puts the station out of service, its pay QR hidden,
-    until a later read matches again (Station.on_recheck); a read that
-    cannot be made changes nothing. Never raises (but can be cancelled)."""
+    """Custody and the public network: the signed registry and, custody,
+    this station's terms on the contract read again, as at startup
+    (registry_check.recheck, escrow.recheck). What no longer matches puts the
+    station out of service, its pay QR hidden, until a later read matches
+    again (Station.on_recheck); a read that cannot be made changes nothing.
+    Never raises (but can be cancelled)."""
     global registry_health, escrow_health
     station.recheck_due = False
     started = station.clock()
@@ -258,14 +260,16 @@ async def recheck_once() -> None:
         if health["status"] == "ok":
             registry_health = health
             station.on_recheck("registry", None, started)
-    try:
-        problems = await asyncio.to_thread(escrow.recheck, cfg, _recheck_ledger)
-    except Exception as exc:
-        log.info("escrow: the station's terms could not be read again (%s); nothing changes", type(exc).__name__)
-    else:
-        if not problems:
-            escrow_health = {"status": "ok", "detail": "contract"}
-        station.on_recheck("escrow", "; ".join(problems) or None, started)
+    if cfg.custody:
+        try:
+            problems = await asyncio.to_thread(escrow.recheck, cfg, _recheck_ledger)
+        except Exception as exc:
+            log.info("escrow: the station's terms could not be read again (%s); nothing changes",
+                     type(exc).__name__)
+        else:
+            if not problems:
+                escrow_health = {"status": "ok", "detail": "contract"}
+            station.on_recheck("escrow", "; ".join(problems) or None, started)
     broadcast()
 
 
@@ -344,6 +348,7 @@ async def lifespan(app: FastAPI):
         log.warning("HOST_PUBLIC_KEY not set: not watching the ledger (debug payments only)")
     if escrow_watcher:
         tasks.append(asyncio.create_task(escrow_watcher.run()))
+    if cfg.rechecks_registry:
         tasks.append(asyncio.create_task(recheck()))
     if free is not None:
         tasks.append(asyncio.create_task(free_days()))

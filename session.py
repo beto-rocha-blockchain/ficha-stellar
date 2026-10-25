@@ -372,10 +372,11 @@ class Station:
         self.served_seeds: dict[str, tuple[bytes, int]] = {}
         self.receipts: list[dict] = []
         self.settled_keys: set[tuple[str, str | None]] = set()
-        # Custody: why this station would no longer start, found while it
-        # runs (main.py reads the registry and the contract again, and a
-        # deposit under other terms says so at once): out of service until
-        # a later read finds it matches again. By source: registry, escrow.
+        # Custody and the public network: why this station would no longer
+        # start, found while it runs (main.py reads the registry and, custody,
+        # the contract again, and a deposit under other terms says so at
+        # once): out of service until a later read finds it matches again. By
+        # source: registry, escrow.
         self.mismatch: dict[str, str] = {}
         self._mismatch_seen: dict[str, float] = {}
         self.recheck_due = False
@@ -1208,11 +1209,12 @@ class Station:
         self.on_recheck(source, problem)
 
     def on_recheck(self, source: str, problem: str | None, started: float | None = None) -> None:
-        """Custody, main.py: the registry ("registry") or this station's terms
-        on the contract ("escrow") read again while the station runs. A
-        problem (why it would not start now) puts it out of service, no pay
-        QR, until a read finds none; a read that started before a deposit
-        showed the problem (started, this station's clock) does not clear it."""
+        """Custody and the public network (cfg.rechecks_registry), main.py:
+        the registry ("registry") or, custody, this station's terms on the
+        contract ("escrow") read again while the station runs. A problem (why
+        it would not start now) puts it out of service, no pay QR, until a
+        read finds none; a read that started before a deposit showed the
+        problem (started, this station's clock) does not clear it."""
         old = self.mismatch.get(source)
         if problem is None:
             if old is None or (started is not None and started < self._mismatch_seen.get(source, -math.inf)):
@@ -2120,7 +2122,9 @@ class Station:
         """Why a payment made now would buy no energy, or None. Relay not
         answering: the payment is refused and logged for refund. Log not
         writable: it can be neither credited nor logged (Horizon hands it
-        over again until it can). Custody, the contract not read for
+        over again until it can). Custody and the public network, the
+        registry (or the contract) read again and no longer matching: the
+        app pays what it says now. Custody, the contract not read for
         ESCROW_STALE_SECONDS (or not yet): a deposit made now would not be
         seen until it is, with its payer maybe gone. The public network,
         Horizon not read for HORIZON_STALE_SECONDS (or not yet): the same,
@@ -2129,10 +2133,11 @@ class Station:
             return f"relay: {self.relay.error}"
         if self.log.error:
             return self.log.error
-        if self.cfg.custody and self.mismatch:
+        if self.cfg.rechecks_registry and self.mismatch:
             # The registry or the contract changed under the running station:
             # the app pays what they say now, which this station would refuse
-            # (or, with another contract, never see).
+            # (or, with another contract, never see; or, direct on public,
+            # sell on the old terms).
             source = next(iter(self.mismatch))
             return f"{source}: {self.mismatch[source]}"
         if self.cfg.custody and self.escrow_watched:

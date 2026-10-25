@@ -151,17 +151,19 @@ signature in `registry/stations.json.sig`.
   only; refused on the public network).
   So what the app shows and charges is what the station sells. A custody
   station then checks the contract too (section 7.5).
-- A custody station runs the same check again every minute while it runs,
-  in the same order and quietly. A difference (a registry published with
-  another `escrow`, other terms, the station made inactive) or a copy that
+- A custody station, and any station on the public network, runs the same
+  check again every minute while it runs, in the same order and quietly. A
+  difference (a registry published with another `escrow`, other terms, the
+  station made inactive) or a copy that
   does not verify puts it out of service, its pay QR hidden and the
   registry item red with the difference, until a read matches again: in
   practice until it is restarted with the new values. With no copy readable
   nothing changes. The app pays the contract the newest registry names, so
   without this a station still watching the old contract would take
-  deposits it never sees. To change a running custody station's entry: stop
-  the station, publish the registry, update its `.env`, start it. Direct
-  stations are not re-read.
+  deposits it never sees, and a public station re-signed with other terms
+  (`ficha_minutes` 5 -> 10 at the same price) would sell the old ones. To
+  change a running station's entry: stop the station, publish the registry,
+  update its `.env`, start it. Direct stations on testnet are not re-read.
 
 ## 3. Receipt QR
 
