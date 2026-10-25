@@ -145,14 +145,15 @@ _refund_cache: dict[str, str] = {}
 
 
 def refund_qr(cfg: Config, due: dict | None) -> dict | None:
-    """Direct mode: the newest refund the host still owes (Station.snapshot),
-    for the operator's card on the waiting screen: its SEP-0007 URI as a QR,
-    which the host's mobile wallet scans, and, with APP_URL, the Ficha site's
+    """Direct mode: the refunds the host still owes (Station.snapshot): how
+    many, for the footer, and, while the operator shows it (R), the newest
+    for its card on the waiting screen: its SEP-0007 URI as a QR, which the
+    host's mobile wallet scans, and, with APP_URL, the Ficha site's
     <APP_URL>/refund?uri=<the URI> (as encodeURIComponent writes it), where
     the Freighter extension signs it as the host. The payer as the card
     shows it: its first and last 6 characters."""
-    if not due:
-        return None
+    if not due or not due.get("uri"):
+        return due
     uri = due["uri"]
     if uri not in _refund_cache:
         _refund_cache.clear()  # only the newest is shown

@@ -273,11 +273,13 @@
   .lastreceipt .qrnote b { display: block; color: var(--success); font-size: 1.15em; margin-bottom: 0.2em; }
   /* Direct mode: a refund the host owes (the station holds no key), for the
      operator, on the waiting screen in the same place, away from the pay
-     QR: the newest, as a SEP-0007 QR the host's mobile wallet scans, and a
-     link to the Ficha site's page that the Freighter extension signs as the
-     host. Labelled as the host's, dashed: someone who came to pay must not
-     scan it. Its payer is the one in the station's log, never an address
-     from a wallet's history. */
+     QR, and only for a minute when the operator presses R: the newest, as a
+     SEP-0007 QR the host's mobile wallet scans, and a link to the Ficha
+     site's page that the Freighter extension signs as the host. Its QR is a
+     pay request any wallet can pay: labelled as the host's, dashed, and
+     never on screen unasked, where someone who came to pay could scan it.
+     Its payer is the one in the station's log, never an address from a
+     wallet's history. */
   .readings > .refundcard { grid-area: tiles; justify-content: center; }
   .refundcard { display: none; border-style: dashed; border-color: rgb(var(--warning-rgb) / .55); }
   body.has-refund .refundcard { display: flex; }
@@ -384,6 +386,8 @@
   /* The escrow contract's events: custody mode only. */
   .h.escrow { display: none; }
   body.custody .h.escrow { display: inline-flex; }
+  /* The refunds the host owes: direct mode only. */
+  body.custody .h.refunds { display: none; }
   /* Health dots, the app's status dots. */
   .dot { width: 0.6em; height: 0.6em; border-radius: 50%; background: rgb(var(--muted-foreground-rgb) / .5); flex-shrink: 0; }
   .dot.ok { background: var(--success); }
@@ -517,6 +521,7 @@
   <span class="h"><span class="dot" id="d-log"></span><span class="k">log</span><span id="t-log"></span></span>
   <span class="h"><span class="dot" id="d-registry"></span><span class="k">registry</span><span id="t-registry"></span></span>
   <span class="h escrow"><span class="dot" id="d-escrow"></span><span class="k">escrow</span><span id="t-escrow"></span></span>
+  <span class="h refunds"><span class="dot" id="d-refunds"></span><span class="k">refunds</span><span id="t-refunds"></span></span>
   <span class="net" id="net">&mdash;</span>
   <span class="h"><span class="k">host</span><b id="host">&mdash;</b></span>
 </footer>
@@ -774,13 +779,17 @@
         "Not a pay QR: open it with Scan QR in the Ficha app. Only the wallet that paid " + lr.session_id
         + " can claim it" + (lr.deadline ? ", " + claimLeft(lr.deadline, d) : "") + "."));
     }
-    // Direct mode: the newest refund the host owes, while waiting only: the
-    // screen of a session being served (charging, finished) is its payer's.
-    var rd = !custody && (st === "AWAITING_PAYMENT" || st === "COURTESY") ? d.refund_due : null;
-    if (rd) {
+    // Direct mode: the newest refund the host owes, only for the minute the
+    // operator shows it (R) and only while waiting for a payment with the pay
+    // QR on screen (the server sends its URI only then): its QR is a pay
+    // request any wallet can pay. The screen of a session being served
+    // (charging, finished) is its payer's.
+    var rd = !custody ? d.refund_due : null;
+    var shown = !!(rd && rd.uri) && st === "AWAITING_PAYMENT" && !oos;
+    if (shown) {
       body.classList.add("has-refund");
       if (rd.qr !== lastRefund) { $("refundqr").src = rd.qr; lastRefund = rd.qr; }
-      $("refundcount").textContent = rd.count > 1 ? "newest of " + rd.count : "";
+      $("refundcount").textContent = (rd.count > 1 ? "newest of " + rd.count + " · " : "") + rd.seconds_left + " s";
       $("refundamount").textContent = amount(rd.amount);
       $("refundasset").textContent = " " + rd.asset;
       var rn = $("refundnote"), to = document.createElement("b");
@@ -870,6 +879,8 @@
     var rg = d.registry || { status: "off", detail: "" };
     dot("registry", rg.status === "ok" ? "ok" : rg.status === "unchecked" ? "warn" : rg.status === "mismatch" ? "bad" : "off",
         rg.status + (rg.detail ? " · " + rg.detail : ""));
+    // Direct mode: the refunds the host owes; R shows the newest for a minute.
+    if (!custody) dot("refunds", rd ? "warn" : "off", rd ? rd.count + " due · R " + (shown ? "hides it" : "shows it") : "none");
     // Custody: the contract, its events, whether its terms were checked at
     // startup, and this computer's clock when it is far from ledger time
     // (deadlines follow the ledger anyway; the log's times do not).
@@ -910,6 +921,9 @@
     // E ends the session for its payer (not an emergency: ESC is); the time
     // not charged comes back as at any other end. Never with a modifier.
     else if ((e.key === "e" || e.key === "E") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) { send("e"); }
+    // R shows the newest refund due for a minute, or hides it (direct mode,
+    // while waiting). Never with a modifier: Ctrl+R reloads the page.
+    else if ((e.key === "r" || e.key === "R") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) { send("r"); }
     // MOCK only (the server ignores it otherwise): U unplugs the simulated
     // phone, or plugs it back into this station.
     else if ((e.key === "u" || e.key === "U") && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) { send("u"); }

@@ -120,6 +120,10 @@ STROOP = Decimal(1).scaleb(-STELLAR_DECIMALS)  # the smallest amount on the ledg
 # Direct mode: the lines whose "refunds" the host owes (a "finished" line's
 # are its session line's, which follows it).
 REFUND_KINDS = ("session", "orphan", "refused", "underpaid")
+# Direct mode: how long the operator's R key shows the newest refund due
+# (show_refund()). Its QR is a pay request that any wallet can pay: it is
+# never on screen unasked, where a customer could scan it for the pay QR.
+REFUND_SHOW_SECONDS = 60.0
 
 # Custody: how many pay links shown and never paid the station remembers. A
 # deposit made later with one of them is refunded in full (its c[0]). As many
@@ -434,6 +438,8 @@ class Station:
         # Direct mode: the refunds the host still owes, oldest first, from
         # the log: {"ref", "payer", "asset", "asset_issuer", "left"} (_owe()).
         self.refunds_due: list[dict] = []
+        # Until when the operator shows the newest of them (show_refund()).
+        self.refund_shown_until: float | None = None
         self._recover()
 
         self.state = State.AWAITING_PAYMENT
@@ -719,6 +725,8 @@ class Station:
     def _enter(self, state: State) -> None:
         log.info("session %s %s -> %s", self.session.id, self.state.value, state.value)
         self.state = state
+        # A refund due shows only while waiting: back to it, only if R asks again.
+        self.refund_shown_until = None
         now = self.wallclock()
         self.session.timestamps.setdefault(state.value, now)
         self.session.transitions.append([state.value, now])
@@ -1058,6 +1066,8 @@ class Station:
             e["left"] -= paid
             amount -= paid
         self.refunds_due = [e for e in self.refunds_due if e["left"] > 0]
+        if not self.refunds_due:
+            self.refund_shown_until = None  # the next one due shows only if R asks again
 
     def on_host_payment(self, p: Payment) -> None:
         """A payment the host's account sent (stellar.HorizonWatcher): never
@@ -1727,6 +1737,40 @@ class Station:
         if not self.session.free_charge:  # a free charge is limited per device per day instead
             self.cooldown_until = self.clock() + self.cfg.courtesy_cooldown_seconds
         self._enter(State.AWAITING_PAYMENT)
+
+    def show_refund(self) -> None:
+        """R, direct mode: the operator shows the newest refund due on the
+        waiting screen for REFUND_SHOW_SECONDS, its QR and its button
+        (snapshot()); R again hides it. Only while the station waits for a
+        payment and takes one, its pay QR on screen: the refund's QR is a
+        pay request that any wallet can pay, and a customer who scanned it
+        for the pay QR would pay the previous payer, never the host."""
+        if self.cfg.custody:
+            return
+        if self._refund_shown():
+            self.refund_shown_until = None
+            return
+        why = self._refund_refusal()
+        if why:
+            self._say(why)
+            return
+        self.refund_shown_until = self.clock() + REFUND_SHOW_SECONDS
+
+    def _refund_refusal(self) -> str | None:
+        """Why the newest refund due cannot show now (show_refund()), or None."""
+        if self.cfg.custody or not self.refunds_due:
+            return "No refund due"
+        if self.state != State.AWAITING_PAYMENT:
+            return "A refund due shows only while the station waits for a payment"
+        oos = self.out_of_service()
+        if oos:
+            return f"Out of service ({oos}): no refund due shows until it clears"
+        return None
+
+    def _refund_shown(self) -> bool:
+        """The operator shows the newest refund due now (show_refund())."""
+        return (self.refund_shown_until is not None and self.clock() < self.refund_shown_until
+                and self._refund_refusal() is None)
 
     # -- the clock ------------------------------------------------------------
     def tick(self, reading: Reading) -> None:
@@ -2412,6 +2456,7 @@ class Station:
         waiting = self.state in (State.AWAITING_PAYMENT, State.COURTESY)
         receipt, turn, turns = self._shown_receipt() if waiting else (None, 0, 0)
         due = self.refunds_due[-1] if self.refunds_due and not self.cfg.custody else None
+        refund_shown = due is not None and self._refund_shown()
         return {
             "state": self.state.value,
             "session_id": s.id,
@@ -2464,14 +2509,16 @@ class Station:
             # which one of them it is.
             "last_receipt": receipt["record"] if receipt else None,
             "last_receipt_turn": [turn, turns] if turns > 1 else None,
-            # Direct mode: the newest refund the host still owes, what is left
-            # of it and the URI that pays that, and how many are due (the
-            # screen shows it while waiting; main.py adds its QR).
-            "refund_due": ({"ref": due["ref"], "payer": due["payer"], "amount": format_amount(due["left"]),
-                            "asset": due["asset"], "asset_issuer": due["asset_issuer"],
-                            "uri": refund_uri(self.cfg, due["payer"], due["left"], due["ref"], due["asset"],
-                                              due["asset_issuer"]),
-                            "count": len(self.refunds_due)} if due else None),
+            # Direct mode: how many refunds the host still owes (the footer)
+            # and, only while the operator shows it (R, show_refund()), the
+            # newest: what is left of it, the URI that pays that (main.py
+            # adds its QR) and the seconds it still shows.
+            "refund_due": ({"count": len(self.refunds_due),
+                            "seconds_left": int(math.ceil(self.refund_shown_until - now)) if refund_shown else None,
+                            **({"ref": due["ref"], "payer": due["payer"], "amount": format_amount(due["left"]),
+                                "asset": due["asset"], "asset_issuer": due["asset_issuer"],
+                                "uri": refund_uri(self.cfg, due["payer"], due["left"], due["ref"], due["asset"],
+                                                  due["asset_issuer"])} if refund_shown else {})} if due else None),
         }
 
     def say(self, text: str, seconds: float = 6.0) -> None:

@@ -1617,20 +1617,27 @@ def test_refunded(tmp: Path) -> None:
 
 
 def test_refund_screen(tmp: Path) -> None:
-    print("direct mode: the refund due on the station screen, a QR and a Freighter button")
+    print("direct mode: the refund due on the station screen, on the operator's R: a QR and a Freighter button")
     site = "https://ficha-stellar.vercel.app"
     a, b = account(1), account(2)
     r = Rig(tmp, station_id="K7M2QX", app_url=site, cursor_dir=tmp)
     st = r.st
     check(r.snap()["refund_due"] is None and refund_qr(r.cfg, None) is None, "nothing due: no refund on screen")
+    st.show_refund()
+    check(r.snap()["notice"] == "No refund due" and st.refund_shown_until is None, "R with nothing due says so")
     paid_by(r, a, "1.5", memo="K7M2QX.F2345678")
     first = f"K7M2QX.tx{r.n:08x}"
     paid_by(r, b, "2", memo="K7M2QX.F3456789")
     newest = f"K7M2QX.tx{r.n:08x}"
+    hidden = {"count": 2, "seconds_left": None}
+    check(r.snap()["refund_due"] == hidden and refund_qr(r.cfg, hidden) == hidden,
+          "due, not asked for: how many only (the footer), no URI and no QR: a pay request any wallet can pay "
+          "(a customer who scanned it for the pay QR would pay the previous payer) is never on screen unasked")
+    st.show_refund()
     due = r.snap()["refund_due"]
-    check(due == {"ref": newest, "payer": b, "amount": "2", "asset": "XLM", "asset_issuer": None,
-                  "uri": refund_uri(r.cfg, b, Decimal(2), newest), "count": 2},
-          "the newest refund due, its URI, and how many are due")
+    check(due == {"count": 2, "seconds_left": 60, "ref": newest, "payer": b, "amount": "2", "asset": "XLM",
+                  "asset_issuer": None, "uri": refund_uri(r.cfg, b, Decimal(2), newest)},
+          "R: the newest refund due, its URI, and how many are due, for 60 s")
     card = refund_qr(r.cfg, due)
     link = card["link"]
     check(card["qr"].startswith("data:image/svg+xml;base64,") and card["payer_short"] == f"{b[:6]}…{b[-6:]}"
@@ -1648,17 +1655,51 @@ def test_refund_screen(tmp: Path) -> None:
                                destination=b))
     check(r.snap()["refund_due"]["ref"] == first and r.snap()["refund_due"]["count"] == 1,
           "paid off: the one before it shows")
+    r.tick(30)
+    left = r.snap()["refund_due"]["seconds_left"]
+    r.tick(30)
+    check(left == 30 and r.snap()["refund_due"] == {"count": 1, "seconds_left": None},
+          "it shows for a minute, counting down, then hides by itself")
+    st.show_refund()
+    st.show_refund()
+    check(r.snap()["refund_due"] == {"count": 1, "seconds_left": None}, "R again hides it")
+    st.show_refund()
+    r.relay.error = "open failed: write timeout"
+    hid = r.snap()["refund_due"] == {"count": 1, "seconds_left": None}
+    st.show_refund()
+    check(hid and r.snap()["notice"].startswith("Out of service (relay: open failed: write timeout)")
+          and r.snap()["refund_due"]["seconds_left"] is None,
+          "out of service (no pay QR): it hides, and R does not show it, so it is never the only QR on screen")
+    r.relay.error = None
+    st.show_refund()
+    paid_by(r, b, "1")
+    check(st.state == State.CHARGING and r.snap()["refund_due"] == {"count": 1, "seconds_left": None},
+          "a payment: the session's screen is its payer's, the refund goes")
+    st.show_refund()
+    check(r.snap()["notice"] == "A refund due shows only while the station waits for a payment",
+          "R while charging: not shown, and the screen says why")
+    st.end_session()
+    r.tick(r.cfg.finished_seconds)
+    check(st.state == State.AWAITING_PAYMENT and r.snap()["refund_due"]["seconds_left"] is None,
+          "back to waiting: hidden until R asks again")
     check(custody_rig(tmp / "custody").st.snapshot()["refund_due"] is None, "custody: never")
 
-    main = sys.modules.get("main") or import_main(tmp)
+    main = import_main(tmp, reload=True)  # a station waiting for a payment: the shared one may be finished
     main.station.closed_ids.add("F3456789")
     main.handle_payment(Payment("12" * 32, "op-m", a, Decimal("1"), "XLM", "F3456789", "", "horizon"))
+    hidden = main.snapshot()["refund_due"]
+    client = TestClient(main.app, base_url="http://127.0.0.1:8000")
+    with client.websocket_connect("/ws", headers={"host": "127.0.0.1:8000"}) as ws:
+        ws.receive_json()
+        ws.send_json({"key": "r"})
+        ws.receive_json()
     shown = main.snapshot()["refund_due"]
     main.station.on_host_payment(Payment("34" * 32, "op-n", HOST, Decimal("1"), "XLM", f"refund {shown['ref']}", "",
                                          "horizon", destination=a))
-    check(shown["qr"].startswith("data:image/svg+xml;base64,") and shown["payer"] == a and shown["link"] is None
-          and main.snapshot()["refund_due"] is None,
-          "main.py's snapshot carries it with its QR (no APP_URL here: no link), and drops it once refunded")
+    check("qr" not in hidden and shown["qr"].startswith("data:image/svg+xml;base64,") and shown["payer"] == a
+          and shown["link"] is None and main.snapshot()["refund_due"] is None,
+          "main.py: /ws key R shows it, its snapshot carries it with its QR (no APP_URL here: no link), and drops "
+          "it once refunded")
 
     html = (Path(__file__).resolve().parent / "static" / "index.html").read_text(encoding="utf-8")
     readings = re.search(r'<section class="readings">.*?</section>', html, re.S).group(0)
@@ -1670,11 +1711,18 @@ def test_refund_screen(tmp: Path) -> None:
     check('<a class="refundbtn" id="refundlink" target="_blank" rel="noopener noreferrer">Refund with Freighter</a>'
           in html and '$("refundlink").href = rd.link' in html and "body.refund-link .refundbtn" in html,
           "the 'Refund with Freighter' button opens the site's page in a new tab, only with APP_URL")
-    check('!custody && (st === "AWAITING_PAYMENT" || st === "COURTESY") ? d.refund_due : null' in html
-          and '"newest of " + rd.count' in html and "rd.payer_short" in html and "amount(rd.amount)" in html
+    check('var shown = !!(rd && rd.uri) && st === "AWAITING_PAYMENT" && !oos;' in html
+          and '"newest of " + rd.count' in html and "rd.seconds_left" in html and "rd.payer_short" in html
+          and "amount(rd.amount)" in html
           and "Not a pay QR: the host's wallet pays it back to the payer in the log." in html,
-          "shown in direct mode while waiting only (never over a session being served), with the amount, the "
-          "payer shortened, the ref, a count when several are due, and 'not a pay QR'")
+          "shown in direct mode only when asked for, while waiting with the pay QR on screen (never over a session "
+          "being served), with the amount, the payer shortened, the ref, the seconds left, a count when several "
+          "are due, and 'not a pay QR'")
+    check('(e.key === "r" || e.key === "R") && !e.ctrlKey' in html and 'send("r")' in html
+          and 'id="d-refunds"' in html and 'dot("refunds"' in html
+          and "body.custody .h.refunds { display: none; }" in html,
+          "R on the station screen (never Ctrl+R, which reloads), and a footer item with how many are due (direct "
+          "mode only)")
 
 
 def test_robustness(tmp: Path) -> None:
