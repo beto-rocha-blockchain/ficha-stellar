@@ -70,11 +70,11 @@ In `../ficha-public`, before any `git init`. Review every hit by eye.
 | Stellar secret keys | `grep -rnE "\bS[A-Z2-7]{55}\b" .` | only the public SEP-5 test vectors in `app/src/wallet/sep5.test.ts` |
 | Recovery words | `grep -rniE "mnemonic\|seed phrase" .` | the SEP-5 vectors and the wallet code |
 | Other secrets | `grep -rniE "secret\|private.?key\|api.?key\|token=\|passw" .` | code and documentation that say secrets are never stored; no value |
-| Local paths | `grep -rnE "C:/Users\|C:\\\\Users\|/mnt/c/\|/home/" .` | only the `/mnt/c/<path to the repo>` placeholder in `contracts/escrow/README.md` and this table's own pattern |
+| Local paths | `grep -rniE "[a-z]:[/\\]+users[/\\]\|/mnt/c/\|/home/" .` | only the `/mnt/c/<path to the repo>` placeholder in `contracts/escrow/README.md` and this table's own pattern |
 | Network addresses, device serials | `grep -rnE "192\.168\.\|10\.[0-9]+\.[0-9]+\.[0-9]+" .` | documentation examples only |
 | Email addresses | `grep -rnE "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}" .` | the organisers' address in the hackathon documents, if kept, and GitHub's no-reply address in this file's step 4 |
 | Names that must not appear | grep for each name on the author's private list | none |
-| Key files | `find . -name "*.secret" -o -name "*.jks" -o -name "*.keystore" -o -name ".env"` | none (the `.env.*.example` files hold no secret) |
+| Key files | `find . \( -name "*.secret" -o -name "*.key" -o -path "*/keys/*" -o -name "*.pem" -o -name "*.p12" -o -name "*.pfx" -o -name "*.jks" -o -name "*.keystore" -o -name "keystore.properties" -o -name "google-services.json" -o -name ".env" -o -name ".env.*" ! -name "*.example" -o -name "*.jsonl" \) -print` | none (the `.env*.example` files hold no secret) |
 
 If a secret scanner such as gitleaks or trufflehog is already installed,
 run it over the folder as well (`gitleaks detect --no-git --source .`).
