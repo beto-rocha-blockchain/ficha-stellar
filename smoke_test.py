@@ -3,7 +3,8 @@
 Covers: payment, courtesy, extension, underpaid, orphan, session cap, ESC,
 verdicts, cut confirmation, both topologies, restart after a crash, the
 offered network QR, station IDs and memos, the signed registry and the
-station's startup check against it, the receipt QR, change and refund hints, payments in another asset, the robustness fixes
+station's startup check against it, the public network's refusals (only a
+real station, checked against the registry, starts there), the receipt QR, change and refund hints, payments in another asset, the robustness fixes
 (cursor, log, relay out of service, held readings, transitions, notices,
 config checks), main.py's screens socket (a client that stops reading,
 other origins) and /debug/pay, and custody mode: the hash chain against the
@@ -131,12 +132,29 @@ def check(cond: bool, what: str) -> None:
         raise SystemExit(1)
 
 
-def refused(cfg: config.Config, what: str) -> None:
+def refused(cfg: config.Config, what: str, says: str = "") -> None:
+    """Refused, and (with says) for that reason, not an earlier one."""
     try:
         config.validate(cfg)
-    except config.ConfigError:
-        return
+    except config.ConfigError as exc:
+        if says in str(exc):
+            return
+        check(False, f"refused: {what}, saying {says!r} (it said: {exc})")
     check(False, f"refused: {what}")
+
+
+# Stands for the public registry's key: this version pins none yet.
+PUBLIC_REGISTRY_KEY = Keypair.random().public_key
+ADB_SERIAL = "192.168.0.20:5555"
+
+
+def on_public(cfg: config.Config, **over) -> config.Config:
+    """cfg as a station on the public network must be (a real relay and
+    phone, charge verification, a STATION_ID, a registry key), with these
+    changes."""
+    return replace(cfg, **{"network": "public", "horizon_url": config.HORIZON_URLS["public"], "mock": False,
+                           "mock_payment": False, "charge_verify": True, "adb_serial": ADB_SERIAL,
+                           "station_id": "K7M2QX", "registry_key": PUBLIC_REGISTRY_KEY, **over})
 
 
 def load_env(**env: str) -> config.Config:
@@ -691,11 +709,19 @@ def test_registry_check(tmp: Path) -> None:
     finally:
         logging.getLogger("ficha.registry").removeHandler(grab)
 
-    pub = load_env(STELLAR_NETWORK="public", MOCK_PAYMENT="false")
+    pub = load_env(STELLAR_NETWORK="public", MOCK="false", MOCK_PAYMENT="false", ADB_SERIAL=ADB_SERIAL,
+                   STATION_ID="K7M2QX", REGISTRY_KEY=PUBLIC_REGISTRY_KEY)
     check(pub.registry_url == "https://ficha-stellar.vercel.app/registry/stations.public.json"
-          and pub.registry_file == root / "registry" / "stations.public.json" and pub.registry_key == ""
-          and registry_check.check(replace(pub, station_id="K7M2QX"), offline)["status"] == "unchecked",
-          "public: stations.public.json, no key pinned yet, so unchecked")
+          and pub.registry_file == root / "registry" / "stations.public.json" and config.REGISTRY_KEYS["public"] == ""
+          and pub.registry_key == PUBLIC_REGISTRY_KEY
+          and registry_check.check(pub, offline) == {"status": "unchecked", "detail": "no copy found"},
+          "public: stations.public.json, no key pinned yet (REGISTRY_KEY gives it), no copy here: unchecked")
+    try:
+        load_env(STELLAR_NETWORK="public", MOCK="false", MOCK_PAYMENT="false", ADB_SERIAL=ADB_SERIAL,
+                 STATION_ID="K7M2QX")
+        check(False, "public with no key pinned and no REGISTRY_KEY: refused")
+    except config.ConfigError as exc:
+        check("needs REGISTRY_KEY" in str(exc), "public with no key pinned and no REGISTRY_KEY: refused")
     secret = Keypair.random().secret
     try:
         load_env(REGISTRY_KEY=secret)
@@ -709,6 +735,104 @@ def test_registry_check(tmp: Path) -> None:
         except config.ConfigError:
             pass
     check(True, "REGISTRY_URL that is not https, or has a query: refused")
+
+
+def test_public(tmp: Path) -> None:
+    print("the public network: a real station, checked against the registry, or no start")
+    root = Path(__file__).resolve().parent
+    r = Rig(tmp)
+    env = {"STELLAR_NETWORK": "public", "MOCK": "false", "MOCK_PAYMENT": "false", "ADB_SERIAL": ADB_SERIAL,
+           "HOST_PUBLIC_KEY": Keypair.random().public_key, "PAYMENT_ASSET_CODE": "XLM", "STATION_ID": "K7M2QX",
+           "REGISTRY_KEY": PUBLIC_REGISTRY_KEY}
+    pub = load_env(**env)
+    check(pub.network == "public" and pub.horizon_url == "https://horizon.stellar.org" and pub.is_native
+          and pub.payment_mode == "direct" and not pub.mock and not pub.mock_payment and pub.registry_check
+          and pub.host_public_key == env["HOST_PUBLIC_KEY"] and pub.registry_key == PUBLIC_REGISTRY_KEY,
+          "a correct public config validates: direct, a real relay and phone, native XLM, STATION_ID, REGISTRY_KEY")
+
+    demo_hosts = {s["host_key"] for s in json.loads((root / "registry" / "stations.json").read_bytes())["stations"]}
+    testnet_registry = config.REGISTRY_KEYS["testnet"]
+    for what, over, says in (
+        ("MOCK=true", {"mock": True}, "MOCK=true on the public network"),
+        ("MOCK_PAYMENT=true", {"mock_payment": True}, "MOCK_PAYMENT=true on the public network"),
+        ("REGISTRY_CHECK=false", {"registry_check": False}, "REGISTRY_CHECK=false on the public network"),
+        ("no STATION_ID", {"station_id": ""}, "STELLAR_NETWORK=public needs STATION_ID"),
+        ("no registry key", {"registry_key": ""}, "STELLAR_NETWORK=public needs REGISTRY_KEY"),
+        ("the testnet registry key as REGISTRY_KEY", {"registry_key": testnet_registry}, "the testnet registry's key"),
+        ("the testnet registry key as HOST_PUBLIC_KEY", {"host_public_key": testnet_registry},
+         "the testnet registry's key"),
+        *((f"the testnet demo host {h[:4]}… as HOST_PUBLIC_KEY", {"host_public_key": h}, "the testnet demo host's key")
+          for h in demo_hosts),
+        *((f"the testnet demo host {h[:4]}… as REGISTRY_KEY", {"registry_key": h}, "the testnet demo host's key")
+          for h in demo_hosts),
+    ):
+        refused(on_public(r.cfg, **over), f"public: {what}", says)
+    check(bool(demo_hosts), "public refuses MOCK, MOCK_PAYMENT, REGISTRY_CHECK=false, no STATION_ID, no registry key, and the "
+          "testnet demo's host and registry keys as either key, each saying so")
+    config.validate(replace(r.cfg, station_id="", registry_check=False, registry_key=testnet_registry,
+                            host_public_key=next(iter(demo_hosts))))
+    check(r.cfg.mock and r.cfg.mock_payment, "testnet unchanged: MOCK, MOCK_PAYMENT, no STATION_ID, "
+                                             "REGISTRY_CHECK=false and the demo's keys still validate")
+    for name in ("HOST_PUBLIC_KEY", "REGISTRY_KEY"):
+        secret = Keypair.random().secret
+        try:
+            load_env(**dict(env, **{name: secret}))
+            check(False, f"public: {name} holding a secret refused")
+        except config.ConfigError as exc:
+            check(secret not in str(exc) and "SECRET" in str(exc),
+                  f"public: {name} holding a secret refused without echoing it")
+
+    pinned = Keypair.random().public_key
+    config.REGISTRY_KEYS["public"] = pinned
+    try:
+        refused(on_public(r.cfg), "public: a REGISTRY_KEY other than the pinned one", f"this version pins ({pinned})")
+        config.validate(on_public(r.cfg, registry_key=pinned))
+        check(load_env(**{k: v for k, v in env.items() if k != "REGISTRY_KEY"}).registry_key == pinned,
+              "once a public key is pinned: an empty REGISTRY_KEY takes it, another one is refused")
+    finally:
+        config.REGISTRY_KEYS["public"] = ""
+
+    def offline(url: str):
+        raise registry_check.Unavailable("ConnectError")
+
+    def startup_refusal(cfg: config.Config) -> str:
+        try:
+            registry_check.startup(cfg, offline)
+        except config.ConfigError as exc:
+            return str(exc)
+        return ""
+
+    logging.disable(logging.WARNING)
+    try:
+        gone = on_public(r.cfg, registry_file=tmp / "stations.public.json")
+        msg = startup_refusal(gone)
+        check("registry unchecked (no copy found) on the public network" in msg and "stations.public.json" in msg,
+              "public, no copy of the registry readable (offline, no file): the station does not start")
+        for over, says in (({"station_id": ""}, "registry off (no STATION_ID)"),
+                           ({"registry_check": False}, "registry off (REGISTRY_CHECK=false)"),
+                           ({"registry_key": ""}, "registry unchecked (no REGISTRY_KEY)")):
+            check(says in startup_refusal(replace(gone, **over)), f"public, {says}: the station does not start")
+        kp = Keypair.random()
+        doc = json.loads((root / "registry" / "stations.json").read_bytes())
+        entry = {k: v for k, v in doc["stations"][0].items() if k not in ("mode", "escrow", "unit_seconds",
+                                                                          "grace_seconds")}
+        doc.update(network="public", stations=[dict(entry, id="K7M2QX", host_key=HOST)])
+        raw = json.dumps(doc, indent=2).encode()
+        (tmp / "stations.public.json").write_bytes(raw)
+        (tmp / "stations.public.json.sig").write_text(json.dumps(registry.sign_bytes(raw, kp)))
+        signed = replace(gone, registry_key=kp.public_key)
+        check(registry_check.startup(signed, offline) == {"status": "ok", "detail": "local copy"},
+              "public, the station matches its entry in a signed public registry: it starts")
+        check("FICHA_MINUTES=1 here" in startup_refusal(replace(signed, ficha_minutes=1)),
+              "public, a station that differs from its entry: refused as on testnet")
+        testnet = replace(r.cfg, station_id="K7M2QX", registry_file=tmp / "missing.json")
+        check(registry_check.startup(testnet, offline) == {"status": "unchecked", "detail": "no copy found"}
+              and registry_check.startup(replace(testnet, station_id=""), offline)["status"] == "off",
+              "testnet unchanged: unchecked or off, the station still starts")
+    finally:
+        logging.disable(logging.NOTSET)
+    main_py = (root / "main.py").read_text(encoding="utf-8")
+    check("registry_health = registry_check.startup(cfg)" in main_py, "main.py checks the registry with startup()")
 
 
 def test_receipt(tmp: Path) -> None:
@@ -1082,11 +1206,11 @@ def test_robustness(tmp: Path) -> None:
                        ("FICHA_PRICE with 8 decimals", {"ficha_price": Decimal("0.00000001")}),
                        ("HORIZON_POLL_SECONDS=0.2", {"horizon_poll_seconds": 0.2}),
                        ("testnet with the public Horizon", {"horizon_url": "https://horizon.stellar.org"}),
-                       ("public with the testnet Horizon", {"network": "public", "mock_payment": False,
-                                                            "horizon_url": "https://horizon-testnet.stellar.org/"}),
                        ("HOST=0.0.0.0 with MOCK_PAYMENT", {"host": "0.0.0.0"}),
                        ("HOST=192.168.0.10 with MOCK_PAYMENT", {"host": "192.168.0.10"})):
         refused(replace(r.cfg, **over), what)
+    refused(on_public(r.cfg, horizon_url="https://horizon-testnet.stellar.org/"), "public with the testnet Horizon",
+            "is the testnet Horizon")
     for ok_over in ({"ficha_price": Decimal("0.0000001")}, {"ficha_price": Decimal("1.50000000")},
                     {"host": "localhost"}, {"host": "::1"}, {"host": "0.0.0.0", "mock_payment": False},
                     {"horizon_url": "https://horizon.example-node.test"}):
@@ -1407,7 +1531,7 @@ def test_verify(tmp: Path) -> None:
     check(opened.count(True) == 1 and r.st.state == State.FINISHED and rec["verify_mode"] == "off"
           and not rec["verified"] and rec["consumed_seconds"] == 300 and rec["probes"] == {"passed": 0, "failed": 0},
           "CHARGE_VERIFY=false: no probes, all 300 s consumed even charging elsewhere (the old behaviour)")
-    public = replace(r.cfg, network="public", mock_payment=False, horizon_url=config.HORIZON_URLS["public"])
+    public = on_public(r.cfg, charge_verify=False)
     config.validate(replace(public, charge_verify=True))
     try:
         config.validate(public)
@@ -1882,9 +2006,8 @@ def test_custody_basics(tmp: Path) -> None:
           and replace(base, host_public_key=Keypair.random().public_key).escrow_cursor_file.name != name,
           f"the escrow cursor file is named per network, contract, host and station ({len(name)} characters: "
           "the contract and host as a digest, for the Windows path limit), in CURSOR_DIR")
-    for what, over in (("custody on the public network", {"network": "public", "mock_payment": False,
-                                                           "horizon_url": "https://horizon.stellar.org"}),
-                       ("custody without STATION_ID", {"station_id": ""}),
+    refused(on_public(base, station_id=base.station_id), "custody on the public network", "testnet only")
+    for what, over in (("custody without STATION_ID", {"station_id": ""}),
                        ("custody without HOST_PUBLIC_KEY", {"host_public_key": ""}),
                        ("custody without ESCROW_CONTRACT", {"escrow_contract": ""}),
                        ("ESCROW_CONTRACT that is an account (G...)", {"escrow_contract": HOST}),
@@ -4217,7 +4340,7 @@ if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
              ("i", test_money), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
-             ("m", test_registry_check), ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
+             ("m", test_registry_check), ("m2", test_public), ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
              ("q", test_custody_restart), ("r", test_escrow_watch), ("r2", test_escrow_rpc30),
              ("s", test_custody_screens),
              ("t", test_custody_receipts), ("u", test_custody_edges), ("v", test_ledger_reset),

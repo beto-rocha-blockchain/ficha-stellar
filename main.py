@@ -40,8 +40,9 @@ log = logging.getLogger("ficha")
 try:
     cfg = config.load()
     # With STATION_ID set: refuse to start unless this station matches its
-    # entry in the signed registry, the one the app shows and pays.
-    registry_health = registry_check.check(cfg)
+    # entry in the signed registry, the one the app shows and pays. On the
+    # public network, also unless the registry could be checked at all.
+    registry_health = registry_check.startup(cfg)
     # Custody: and its terms on the escrow contract, read with no key.
     escrow_health = escrow.check(cfg)
 except config.ConfigError as exc:

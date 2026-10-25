@@ -88,7 +88,8 @@ Each station can carry an ID and a name in `.env`:
 
 With `STATION_ID` set, the station checks itself against the signed station
 registry at startup (section 5) and refuses to start when its entry differs
-from `.env`. `REGISTRY_CHECK=false` skips that (development only).
+from `.env`. `REGISTRY_CHECK=false` skips that (development only: the public
+network refuses it, section 4).
 
 The station refuses to start on a configuration that cannot work or is unsafe,
 and says what to change. Besides the topology and network combinations:
@@ -100,13 +101,20 @@ decimals, `MIN_CURRENT_MA` below 1, `HORIZON_POLL_SECONDS` below 0.5, a
 cannot be written (or whose directory does not exist), a malformed
 `STATION_ID`, an `APP_URL` or `REGISTRY_URL` that is not https, a secret key
 in `REGISTRY_KEY`, a station that differs from its signed registry entry,
-`CHARGE_VERIFY=false` on the public network, `METER_SOURCE=outlet` without
-`MOCK`, probe or pause timings out of range (section 6), and free emergency
-minutes that cannot work (section 3: free minutes without a portal, a portal
-without `EMERGENCY_NUMBERS`, more than 6 numbers or one that does not end in
-a number, free seconds outside 0 to 3600, a `FREE_RESET` other than
-`midnight`, `WIFI_PORTAL=opennds` on a loopback `HOST` or without
-`WIFI_SSID`).
+`METER_SOURCE=outlet` without `MOCK`, probe or pause timings out of range
+(section 6), and free emergency minutes that cannot work (section 3: free
+minutes without a portal, a portal without `EMERGENCY_NUMBERS`, more than 6
+numbers or one that does not end in a number, free seconds outside 0 to
+3600, a `FREE_RESET` other than `midnight`, `WIFI_PORTAL=opennds` on a
+loopback `HOST` or without `WIFI_SSID`).
+
+On the public network (section 4) it also refuses `MOCK=true`,
+`MOCK_PAYMENT=true`, `CHARGE_VERIFY=false`, `PAYMENT_MODE=custody`,
+`REGISTRY_CHECK=false`, an empty `STATION_ID`, no registry key (none is
+pinned for public yet: set `REGISTRY_KEY`), a `REGISTRY_KEY` other than the
+pinned public key once there is one, the testnet demo's host or registry key
+as `HOST_PUBLIC_KEY` or `REGISTRY_KEY`, and a registry that could not be
+checked at startup (anything but `registry ok`, even offline).
 
 To receive real **testnet** payments, set `HOST_PUBLIC_KEY` to a testnet
 account you control (create and fund one in Stellar Laboratory) and pay the
@@ -290,7 +298,10 @@ rules: [free-minutes.md](free-minutes.md).
    issuer on stellar.expert** before going live, and make sure the host
    account has a trustline to it.
 4. `FICHA_PRICE` in the new asset (e.g. `0.25` USDC).
-5. `MOCK_PAYMENT=false` (the station refuses to start otherwise) and `MOCK=false`.
+5. `MOCK_PAYMENT=false` and `MOCK=false`: the station refuses to start with
+   either on public (free energy, or real payments for a simulated relay and
+   phone). `CHARGE_VERIFY=false` and `PAYMENT_MODE=custody` are refused too:
+   public is direct mode only.
 6. Cursor: nothing to do. The cursor file is named per network and account,
    so the new pair starts at the last payment made before the station
    started and never replays history.
@@ -298,9 +309,18 @@ rules: [free-minutes.md](free-minutes.md).
    and price) in `registry/stations.public.json`, sign it and verify it with
    the pinned public registry key (section 5). The app warns loudly before
    paying a station it cannot find there, or whose host key differs. Set
-   `REGISTRY_KEY` to that key: none is pinned for public yet, and without it
-   the station starts with its registry unchecked.
-8. The footer badge must read **MAINNET**.
+   `REGISTRY_KEY` to that key: none is pinned for public yet, and the station
+   refuses to start without it (once one is pinned, any other is refused).
+   On public the station also refuses to start without `STATION_ID`, with
+   `REGISTRY_CHECK=false`, and unless the startup check says `registry ok`:
+   with no copy of the registry readable (offline and no
+   `registry/stations.public.json`) it does not start, where testnet starts
+   unchecked.
+8. Keys: the testnet demo's host key (`GCJC2PFI…3XTN6`, in the `.env`
+   examples) and the testnet registry key are refused on public, as either
+   `HOST_PUBLIC_KEY` or `REGISTRY_KEY`: the same key is a valid mainnet
+   account, and real payments would go to the demo's.
+9. The footer badge must read **MAINNET**.
 
 ## 5. How money flows
 
@@ -428,8 +448,9 @@ Change .env to the registry's values. If the registry is what is wrong, edit reg
 
 A copy whose signature does not verify also stops the start; a page that is
 not the registry at all (a WiFi login page) only makes it try the local copy.
-With no copy readable the station starts anyway, since it must work offline,
-and says so in the log and on the footer (**registry unchecked**). The footer
+With no copy readable a testnet station starts anyway, since it must work
+offline, and says so in the log and on the footer (**registry unchecked**); a
+station on the public network does not start (section 4). The footer
 shows `registry ok · site` or `ok · local copy` when the check passed, and
 `off` without `STATION_ID` or with `REGISTRY_CHECK=false`. A custody station
 also reads it again every minute while it runs, and goes out of service

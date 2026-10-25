@@ -9,8 +9,10 @@ first, then the copy in the repo), verifies its signature with the pinned
 PUBLIC key (the station still holds no secret) and refuses to start on any
 difference, naming each one.
 
-With neither copy readable the station still starts, because it must work
-offline: the log and the footer say the registry is unchecked.
+With neither copy readable the station still starts on testnet, because it
+must work offline: the log and the footer say the registry is unchecked. On
+the public network it does not start (startup()): real money is paid only to
+a station the registry vouches for.
 
 A custody station reads the registry again while it runs (recheck(), every
 minute, main.py): the app pays the contract the registry names, so a
@@ -221,10 +223,31 @@ def check(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url, 
         return {"status": "ok", "detail": label}
 
     if not quiet:
-        log.warning("registry UNCHECKED: no copy could be read (%s). Starting anyway, since the "
-                    "station must work offline; make sure .env matches the registry entry for %s.",
-                    "; ".join(missed), cfg.station_id)
+        log.warning("registry UNCHECKED: no copy could be read (%s). %s", "; ".join(missed),
+                    "On the public network the station does not start." if cfg.network == "public" else
+                    "Starting anyway, since the station must work offline; make sure .env matches the "
+                    f"registry entry for {cfg.station_id}.")
     return {"status": "unchecked", "detail": "no copy found"}
+
+
+def startup(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url) -> dict:
+    """check() at startup (main.py). On the public network the station starts
+    only with the registry checked and matching ("ok"): a station that takes
+    real payments, unchecked, could sell one thing while the app promises
+    another. Raises ConfigError otherwise; testnet starts as check() says."""
+    health = check(cfg, fetch)
+    if cfg.network != "public" or health["status"] == "ok":
+        return health
+    if health["detail"] == "no copy found":
+        fix = (f"Put the signed copy at {_shown(cfg.registry_file)} (and its .sig), or start with "
+               f"this computer online so it reads {cfg.registry_url}.")
+    else:
+        fix = "Set STATION_ID and REGISTRY_KEY, and leave REGISTRY_CHECK on."
+    raise ConfigError(
+        f"registry {health['status']} ({health['detail']}) on the public network: a station that takes real "
+        "payments starts only when it matches its entry in the signed registry, the one the app shows and "
+        f"pays. {fix}"
+    )
 
 
 def recheck(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url) -> dict:

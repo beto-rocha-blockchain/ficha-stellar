@@ -55,8 +55,16 @@ DEFAULT_ASSETS = {
 REGISTRY_SITE = "https://ficha-stellar.vercel.app/registry/"
 REGISTRY_FILES = {"testnet": "stations.json", "public": "stations.public.json"}
 # The registry public key the app pins. None yet for public: that registry is
-# not published, so a public station starts with its registry unchecked.
+# not published, so a public station needs REGISTRY_KEY set (validate_public).
 REGISTRY_KEYS = {"testnet": "GBC2MDBTM4MX3XJKRX5QM3YXUR2AISCOJGJ74MXLPIZHZDIDHOLFAASA", "public": ""}
+# The testnet demo's keys (registry/stations.json, the .env examples). The
+# same key is a valid account on the public network: a .env copied from a
+# demo would send real money to the demo's host, or check a public registry
+# with the testnet one's key. Refused on public, as either key.
+TESTNET_DEMO_KEYS = {
+    "GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6": "the testnet demo host's key",
+    REGISTRY_KEYS["testnet"]: "the testnet registry's key",
+}
 
 MEMO_TEXT_MAX_BYTES = 28
 STELLAR_DECIMALS = 7  # amounts on the ledger have 7 decimal places
@@ -482,6 +490,11 @@ def validate(cfg: Config) -> None:
             "MOCK_PAYMENT=true on the public network would hand out free energy. "
             "Turn it off before switching to public."
         )
+    if cfg.mock and cfg.network == "public":
+        raise ConfigError(
+            "MOCK=true on the public network would take real payments for a simulated relay and "
+            "meter: no phone would charge. Turn it off (a real relay and phone) before switching to public."
+        )
     if cfg.mock_payment and not _is_loopback(cfg.host):
         raise ConfigError(
             f"HOST={cfg.host} with MOCK_PAYMENT=true lets anyone on the network make "
@@ -572,6 +585,7 @@ def validate(cfg: Config) -> None:
 
     validate_charge_verify(cfg)
     validate_custody(cfg)
+    validate_public(cfg)
 
     if cfg.wifi_ssid:
         if len(cfg.wifi_ssid.encode("utf-8")) > 32:
@@ -739,3 +753,36 @@ def validate_custody(cfg: Config) -> None:
     stroops = cfg.ficha_price.scaleb(STELLAR_DECIMALS)
     if stroops * cfg.max_fichas * (cfg.chain_len + 1) > I128_MAX:
         raise ConfigError("FICHA_PRICE is too large for the contract's arithmetic")
+
+
+def validate_public(cfg: Config) -> None:
+    """The public network: real money, direct mode only (validate_custody).
+    A station takes it only as its entry in the signed public registry
+    describes it, the one the app shows and pays: so the registry must be
+    checkable, and it is checked at startup (registry_check.startup()).
+    MOCK and MOCK_PAYMENT are refused in validate()."""
+    if cfg.network != "public":
+        return
+    if not cfg.registry_check:
+        raise ConfigError("REGISTRY_CHECK=false on the public network: a station that takes real payments must "
+                          "match its entry in the signed registry, the one the app shows and pays. Turn it on "
+                          "(skipping the check is for development on testnet only).")
+    if not cfg.station_id:
+        raise ConfigError("STELLAR_NETWORK=public needs STATION_ID: the app finds this station in the signed "
+                          "registry by the ID in its pay QR's memo, and the station checks itself against that "
+                          "entry at startup. Use its ID in registry/stations.public.json.")
+    rkey, pinned = cfg.registry_key, REGISTRY_KEYS["public"]
+    if not rkey:
+        raise ConfigError("STELLAR_NETWORK=public needs REGISTRY_KEY, the public registry's PUBLIC key (starts "
+                          "with G): this version pins none for public yet, and the station does not start on a "
+                          "registry it cannot verify.")
+    for name, value, why in (("HOST_PUBLIC_KEY", cfg.host_public_key, "real payments would go to the demo's "
+                              "account. Put the mainnet public key of this station's host"),
+                             ("REGISTRY_KEY", rkey, "the public registry is signed with its own key. Put that "
+                              "key, or leave REGISTRY_KEY empty for the pinned one")):
+        if value in TESTNET_DEMO_KEYS:
+            raise ConfigError(f"{name}={value} is {TESTNET_DEMO_KEYS[value]}, from the testnet demo: on the "
+                              f"public network {why}.")
+    if pinned and rkey != pinned:
+        raise ConfigError(f"REGISTRY_KEY={rkey} is not the public registry key this version pins ({pinned}), the "
+                          "one the app verifies the registry with. Leave REGISTRY_KEY empty to use it.")
