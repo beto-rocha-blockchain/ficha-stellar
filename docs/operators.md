@@ -512,9 +512,11 @@ Vercel project `ficha`, deployed on each push from the private site
 repository, which holds only the built site. After
 signing, from `app/`: `npm run build:site`, then
 `node scripts/publish-site.mjs <checkout of the site repository>`, and commit
-and push there. `/registry/` is served with `Cache-Control: no-cache`, so
-stations and apps see the new signature at once. Details in
-`app/README.md` and `docs/station-app-contract.md` (section 6).
+and push there. Both stop on a registry without its `.sig` or a copy that
+is not byte for byte the repo's. `/registry/` is served with
+`Cache-Control: no-cache`, so stations and apps see the new signature at
+once. Details in `app/README.md` and `docs/station-app-contract.md`
+(section 6).
 
 ## 6. Time counts only while this station charges the phone
 

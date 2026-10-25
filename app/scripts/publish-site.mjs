@@ -14,9 +14,13 @@
 // build loads its lazy route chunks from them. registry/ is copied byte for
 // byte: its signature covers the exact bytes, so the target should mark it
 // -text in .gitattributes; the script writes that file when the target has none.
+// Nothing is copied unless dist-site/registry/ holds exactly the signed
+// registries of ../registry (scripts/registries.mjs): an unsigned one, a stray
+// file or a copy that differs stops the publish.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkRegistries } from "./registries.mjs";
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(app, "..");
@@ -27,6 +31,15 @@ const KEPT = ".ficha-site-files-kept";
 function fail(msg) {
   console.error(`[publish-site] ${msg}`);
   process.exit(1);
+}
+
+/** checkRegistries() of `dir`, failing the publish on a problem (`then`: what to do about it). */
+function registries(dir, label, then = "") {
+  try {
+    return checkRegistries(join(repo, "registry"), dir, label);
+  } catch (e) {
+    fail(`${e.message}${then}`);
+  }
 }
 
 const arg = process.argv[2];
@@ -42,6 +55,8 @@ const inside = (dir, p) => {
 };
 // Never the source tree itself (nor a folder that holds it, nor one inside app/).
 if (inside(target, repo) || inside(app, target)) fail(`${target} is the source repo or inside app/: give the site's own checkout`);
+// Before anything is written: the build carries every signed registry, as signed, and nothing else.
+registries(join(src, "registry"), "app/dist-site/registry", ". Nothing was copied: run npm run build:site again.");
 
 /** Every file under `dir`, as forward-slash paths relative to it. */
 function files(dir, base = dir) {
@@ -88,9 +103,7 @@ writeFileSync(join(target, LIST), `${next.join("\n")}\n`);
 writeFileSync(join(target, KEPT), kept.map((f) => `${f}\n`).join(""));
 if (!existsSync(join(target, ".gitattributes"))) writeFileSync(join(target, ".gitattributes"), "registry/** -text\n");
 
-// Same bytes as the repo's signed registry, or the app rejects the site's copy.
-for (const f of ["stations.json", "stations.json.sig"]) {
-  if (!readFileSync(join(target, "registry", f)).equals(readFileSync(join(repo, "registry", f)))) fail(`registry/${f} in the target differs from ../registry/${f}`);
-}
+// Same bytes as the repo's signed registries, or the app rejects the site's copy.
+registries(join(target, "registry"), `${target}/registry`, ". Fix the target before you push it.");
 console.log(`[publish-site] ${next.length} file(s) copied, ${kept.length} of the previous build kept, ${removed} old file(s) removed -> ${target}`);
 console.log("[publish-site] next, in the target: git status; git add -A; git commit; git push");

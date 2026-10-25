@@ -62,7 +62,10 @@ cd <site checkout> && git status && git add -A && git commit -m "Site: ..." && g
   build is the fallback when the site cannot be reached, the last verified
   live copy is kept for offline use, and the newest verified copy
   (`issued_at`) wins. The Stations screens say which copy is in use and when
-  it was issued.
+  it was issued. `build:site` and `publish-site.mjs` check every registry
+  they carry (`scripts/registries.mjs`): byte for byte as in `../registry/`,
+  nothing else in `registry/`, and a `stations.public.json` without its
+  `.sig` stops them (an unsigned registry is never published).
 - `publish-site.mjs` never commits or pushes. It removes only the files it
   wrote on the previous run (listed in `.ficha-site-files` there) and adds
   `registry/** -text` to the target's `.gitattributes` when it has none.

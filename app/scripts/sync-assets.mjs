@@ -3,13 +3,16 @@
 //    ../registry/stations.json and stations.public.json with their .sig ->
 //    public/registry/ byte for byte (the signature covers the exact bytes).
 //    Nothing else in registry/ is published: a draft (stations.draft.json)
-//    or a stray file there would otherwise go to the public site.
+//    or a stray file there would otherwise go to the public site. The names
+//    are REGISTRY_FILE (scripts/registries.mjs), the ones build:site and
+//    publish:site check, which also refuse a registry without its .sig.
 // 2. Builds the PWA/app icons from ../brand:
 //    - brand/ficha-app-icon.svg if it exists, else the mark on the dark background;
 //    - brand/png/*.png copied as-is when present (e.g. icon-192x192.png).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { REGISTRY_FILE } from "./registries.mjs";
 
 const app = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = join(app, "..");
@@ -23,7 +26,7 @@ mkdirSync(regDst, { recursive: true });
 let n = 0;
 if (existsSync(regSrc)) {
   for (const f of readdirSync(regSrc)) {
-    if (/^stations(\.public)?\.json(\.sig)?$/.test(f)) {
+    if (REGISTRY_FILE.test(f)) {
       copyFileSync(join(regSrc, f), join(regDst, f));
       n++;
     }

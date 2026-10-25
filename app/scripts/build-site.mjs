@@ -10,7 +10,8 @@
 //     from another origin) and no-cache (a new signature shows at once).
 //   - .well-known/assetlinks.json: makes https://ficha-stellar.vercel.app/r a
 //     verified App Link of app.ficha.wallet (AndroidManifest.xml).
-// - registry/ (signed, byte for byte), the icons and the manifest come from public/.
+// - registry/ (every signed registry, byte for byte: scripts/registries.mjs),
+//   the icons and the manifest come from public/.
 //
 // scripts/publish-site.mjs copies the result into a checkout of the private
 // site repository the Vercel project deploys.
@@ -18,10 +19,12 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkRegistries, registryFiles } from "./registries.mjs";
 
 export const SITE_BASE = "/";
 const app = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(app, "dist-site");
+const registry = join(app, "..", "registry");
 
 /** Runs a node script of the app (no shell). */
 function node(script, args = [], env = {}) {
@@ -29,6 +32,18 @@ function node(script, args = [], env = {}) {
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
+/** Runs one of the registry checks; a problem fails the build. */
+function registries(check) {
+  try {
+    return check();
+  } catch (e) {
+    console.error(`[build-site] ${e.message}`);
+    process.exit(1);
+  }
+}
+
+// Before building: a registry without its .sig fails here, not on the site.
+registries(() => registryFiles(registry));
 node("scripts/sync-assets.mjs");
 node("node_modules/vite/bin/vite.js", ["build", "--outDir", "dist-site", "--emptyOutDir"], { VITE_BASE: SITE_BASE });
 
@@ -51,14 +66,10 @@ if (missing.length) {
   console.error(`[build-site] missing in dist-site/: ${missing.join(", ")}`);
   process.exit(1);
 }
-// The registry signature covers the exact bytes: the copy must be identical.
-const repo = join(app, "..");
-for (const f of ["stations.json", "stations.json.sig"]) {
-  if (!readFileSync(join(out, "registry", f)).equals(readFileSync(join(repo, "registry", f)))) {
-    console.error(`[build-site] dist-site/registry/${f} differs from ../registry/${f}`);
-    process.exit(1);
-  }
-}
+// The registry signature covers the exact bytes: every signed registry
+// (stations.public.json too, once there is one) must be identical, and
+// nothing else may sit next to them.
+const published = registries(() => checkRegistries(registry, join(out, "registry"), "dist-site/registry"));
 const html = readFileSync(join(out, "index.html"), "utf8");
 if (!html.includes(`src="${SITE_BASE}assets/`)) {
   console.error(`[build-site] index.html does not load its scripts from ${SITE_BASE}assets/`);
@@ -69,4 +80,5 @@ if (manifest.scope !== SITE_BASE || manifest.start_url !== SITE_BASE) {
   console.error(`[build-site] manifest scope/start_url is not ${SITE_BASE}`);
   process.exit(1);
 }
+console.log(`[build-site] registry: ${published.filter((f) => !f.endsWith(".sig")).join(", ")}, signed`);
 console.log("[build-site] dist-site/ ready (site root /): node scripts/publish-site.mjs <site checkout>");
