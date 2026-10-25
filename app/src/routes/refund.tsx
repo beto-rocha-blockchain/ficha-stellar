@@ -4,9 +4,11 @@
  * Freighter browser extension (src/refund/freighter.ts). Public route: no
  * Ficha wallet and no PIN, since the host signs with its own account. The
  * network is the URI's, not the app's setting; the station in the memo must
- * be in that network's signed registry, Freighter must be on that network
- * with the station's host_key, and the destination is shown in full before
- * signing. An unknown outcome is never sent again from here.
+ * be in that network's signed registry, the destination must have paid the
+ * host at least the amount under REF (the host's payments on the ledger,
+ * read on load and again right before building), Freighter must be on that
+ * network with the station's host_key, and the destination is shown in full
+ * before signing. An unknown outcome is never sent again from here.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useRouterState } from "@tanstack/react-router";
@@ -15,11 +17,21 @@ import { explorerUrl, type NetworkConfig } from "@/config";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { useLang, useT } from "@/i18n";
-import { shortAddress } from "@/lib/format";
+import { formatDateTime, shortAddress } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { getRegistry, type Registry } from "@/registry";
-import { FreighterError, connectFreighter, freighterBlocks, readFreighter, sendRefund, type FreighterSession } from "@/refund/freighter";
-import { RefundError, checkRefund, parseRefundUri, type RefundCheck, type RefundRequest } from "@/refund/request";
+import type { HostPayment } from "@/pay/history";
+import { getRegistry, type Registry, type Station } from "@/registry";
+import { FreighterError, LedgerBlockError, connectFreighter, freighterBlocks, readFreighter, sendRefund, type FreighterSession } from "@/refund/freighter";
+import {
+  LEDGER_PAGES,
+  RefundError,
+  checkRefund,
+  parseRefundUri,
+  readRefundLedger,
+  type LedgerCheck,
+  type RefundCheck,
+  type RefundRequest,
+} from "@/refund/request";
 import { SubmitError, describeStellarError, formatAmount } from "@/stellar";
 
 export const Route = createFileRoute("/refund")({ component: RefundScreen });
@@ -130,10 +142,136 @@ function RefundView({ r }: { r: RefundRequest }) {
     );
   }
 
+  return <LedgerView r={r} station={check.station} />;
+}
+
+type LedgerState = { state: "loading" } | { state: "error" } | { state: "done"; check: LedgerCheck };
+
+/** The block a ledger check gives, with its values. */
+function ledgerBlock(c: Exclude<LedgerCheck, { state: "ok" }>, r: RefundRequest, station: Station, lang: "pt-BR" | "en", t: (k: string, v?: Record<string, string>) => string): string {
+  const code = r.req.asset.code;
+  switch (c.state) {
+    case "no_payment":
+      return [
+        t("ledger.no_payment", { ref: r.refText, code }),
+        c.complete ? "" : t("ledger.notAll", { n: String(LEDGER_PAGES * 200) }),
+        r.ref.kind === "payment" ? t("ledger.dust", { price: formatAmount(station.ficha_price, lang, 7, 0), code }) : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+    case "more_than_paid":
+      return t("ledger.more_than_paid", { amount: formatAmount(r.amount, lang, 7, 0), left: formatAmount(c.left, lang, 7, 0), code, ref: r.refText });
+    default: {
+      const unknown: never = c;
+      void unknown;
+      return t("ledger.unreadable", { net: r.net.label });
+    }
+  }
+}
+
+/** The payments the ledger check found: amount, date and transaction. */
+function PaymentRows({ title, payments, net }: { title: string; payments: HostPayment[]; net: NetworkConfig }) {
+  const { lang } = useLang();
+  if (payments.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <div className="text-[12px] text-muted-foreground">{title}</div>
+      <ul className="space-y-1">
+        {payments.map((p) => (
+          <li key={p.id} className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12px]">
+            <span className="font-semibold">
+              {formatAmount(p.amount, lang, 7, 0)} {p.assetCode}
+            </span>
+            <span className="text-muted-foreground">{formatDateTime(p.createdAt, lang)}</span>
+            <a href={explorerUrl(net, "tx", p.txHash)} target="_blank" rel="noreferrer" className="text-primary underline">
+              tx {p.txHash.slice(0, 8)}…
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function LedgerFound({ r, paid, refunds }: { r: RefundRequest; paid: HostPayment[]; refunds: HostPayment[] }) {
+  const t = useT("refund");
+  return (
+    <div className="space-y-2">
+      <PaymentRows title={t("ledger.paid", { from: shortAddress(r.req.destination, 6, 6), ref: r.refText })} payments={paid} net={r.net} />
+      <PaymentRows title={t("ledger.refunds", { memo: r.req.memo })} payments={refunds} net={r.net} />
+    </div>
+  );
+}
+
+/** The refund against the host's payments on the ledger (src/refund/request.ts checkLedger): only "ok" reaches the sign button. */
+function LedgerView({ r, station }: { r: RefundRequest; station: Station }) {
+  const t = useT("refund");
+  const tc = useT("common");
+  const { lang } = useLang();
+  const [ledger, setLedger] = useState<LedgerState>({ state: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    setLedger({ state: "loading" });
+    readRefundLedger(r, station).then(
+      (check) => {
+        if (alive) setLedger({ state: "done", check });
+      },
+      () => {
+        if (alive) setLedger({ state: "error" });
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [r, station, attempt]);
+
+  if (ledger.state === "loading") {
+    return (
+      <>
+        <RefundFacts r={r} stationName={station.name} />
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-primary" /> {t("checkingLedger")}
+        </p>
+      </>
+    );
+  }
+
+  if (ledger.state === "error") {
+    return (
+      <>
+        <Blocked text={t("ledger.unreadable", { net: r.net.label })} />
+        <Button variant="outline" onClick={() => setAttempt((a) => a + 1)}>
+          <RefreshCw /> {tc("retry")}
+        </Button>
+        <RefundFacts r={r} stationName={station.name} />
+      </>
+    );
+  }
+
+  const check = ledger.check;
+  if (check.state !== "ok") {
+    return (
+      <>
+        <Blocked text={ledgerBlock(check, r, station, lang, t)} />
+        <RefundFacts r={r} stationName={station.name} />
+        {check.state !== "no_payment" && <LedgerFound r={r} paid={check.paid} refunds={check.refunds} />}
+      </>
+    );
+  }
+
   return (
     <>
-      <RefundFacts r={r} stationName={check.station.name} />
-      <SignRefund r={r} hostKey={check.station.host_key} />
+      <RefundFacts r={r} stationName={station.name} />
+      <div className="space-y-2 rounded-md border border-success/40 bg-success/10 px-3 py-2">
+        <p className="flex items-start gap-2 text-[12px] font-medium">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+          {t("ledger.ok", { left: formatAmount(check.left, lang, 7, 0), code: r.req.asset.code })}
+        </p>
+        <LedgerFound r={r} paid={check.paid} refunds={check.refunds} />
+      </div>
+      <SignRefund r={r} station={station} onBlocked={(check) => setLedger({ state: "done", check })} />
     </>
   );
 }
@@ -226,9 +364,10 @@ function freighterText(e: unknown, t: (k: string, v?: Record<string, string>) =>
   return describeStellarError(e);
 }
 
-function SignRefund({ r, hostKey }: { r: RefundRequest; hostKey: string }) {
+function SignRefund({ r, station, onBlocked }: { r: RefundRequest; station: Station; onBlocked: (c: Exclude<LedgerCheck, { state: "ok" }>) => void }) {
   const t = useT("refund");
   const { lang } = useLang();
+  const hostKey = station.host_key;
   const [conn, setConn] = useState<Conn>({ state: "idle" });
   const [send, setSend] = useState<Send>({ state: "idle" });
   // One send at a time, even on a double click before the button re-renders disabled.
@@ -259,10 +398,12 @@ function SignRefund({ r, hostKey }: { r: RefundRequest; hostKey: string }) {
         sending.current = false;
         return;
       }
-      const res = await sendRefund(r, hostKey, () => setSend({ state: "sending" }));
+      const res = await sendRefund(r, station, () => setSend({ state: "sending" }));
       setSend({ state: "done", hash: res.hash });
     } catch (e) {
       if (e instanceof SubmitError && e.kind === "unknown") setSend({ state: "unknown" });
+      // The ledger, read again right before building, no longer allows it: nothing was signed.
+      else if (e instanceof LedgerBlockError) onBlocked(e.check);
       else {
         // Rejected by the network or by Freighter: nothing happened, the host may try again.
         setSend({ state: "error", text: freighterText(e, t) });

@@ -6,7 +6,7 @@
  *
  *   const s = await connectFreighter();                  // asks for access once
  *   freighterBlocks(s, r.net, station.host_key);         // [] = right network and account
- *   const { hash } = await sendRefund(r, station.host_key);
+ *   const { hash } = await sendRefund(r, station);       // checks the ledger again first
  */
 import { getAddress, getNetworkDetails, isConnected, requestAccess, signTransaction } from "@stellar/freighter-api";
 import { FeeBumpTransaction, Keypair, TransactionBuilder, type Transaction } from "@stellar/stellar-sdk";
@@ -14,7 +14,8 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { shortAddress } from "@/lib/format";
 import { buildPaymentTx, submitTx } from "@/stellar/tx";
 import type { NetworkConfig } from "@/config";
-import { networkFor, type RefundRequest } from "./request";
+import type { Station } from "@/registry/verify";
+import { networkFor, readRefundLedger, type LedgerCheck, type RefundRequest } from "./request";
 
 export class FreighterError extends Error {
   constructor(
@@ -110,14 +111,25 @@ export async function signWithFreighter(tx: Transaction, net: NetworkConfig, hos
   return signed;
 }
 
+/** The ledger does not allow this refund, read again right before building it: nothing is signed. */
+export class LedgerBlockError extends Error {
+  constructor(public check: Exclude<LedgerCheck, { state: "ok" }>) {
+    super(`refund ledger: ${check.state}`);
+    this.name = "LedgerBlockError";
+  }
+}
+
 /**
- * Build, sign in Freighter and submit, once. A SubmitError "unknown" means
- * it MAY have gone through: the caller never sends it again on its own.
- * `onSigned`: Freighter has signed, the submit starts.
+ * Check the ledger again (the page's check may be minutes old), build, sign
+ * in Freighter and submit, once. A SubmitError "unknown" means it MAY have
+ * gone through: the caller never sends it again on its own. `onSigned`:
+ * Freighter has signed, the submit starts.
  */
-export async function sendRefund(r: RefundRequest, hostKey: string, onSigned?: () => void): Promise<{ hash: string; ledger: number }> {
-  const tx = await buildRefundTx(r, hostKey);
-  const signed = await signWithFreighter(tx, r.net, hostKey);
+export async function sendRefund(r: RefundRequest, station: Pick<Station, "host_key" | "ficha_price">, onSigned?: () => void): Promise<{ hash: string; ledger: number }> {
+  const ledger = await readRefundLedger(r, station);
+  if (ledger.state !== "ok") throw new LedgerBlockError(ledger);
+  const tx = await buildRefundTx(r, station.host_key);
+  const signed = await signWithFreighter(tx, r.net, station.host_key);
   onSigned?.();
   return submitTx(r.net, signed);
 }

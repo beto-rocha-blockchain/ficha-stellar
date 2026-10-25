@@ -8,8 +8,9 @@ import { NETWORKS } from "@/config";
 import { DICTS, LANGS } from "@/i18n";
 import { reloadIsSafe } from "@/native/service-worker";
 import { getRegistry, type Registry, type Station } from "@/registry";
-import { buildRefundTx, connectFreighter, freighterBlocks, readFreighter, sendRefund, type FreighterSession } from "./freighter";
-import { RefundError, checkRefund, parseRefundRef, parseRefundUri, refundCap } from "./request";
+import { LedgerBlockError, buildRefundTx, connectFreighter, freighterBlocks, readFreighter, sendRefund, type FreighterSession } from "./freighter";
+import type { HostPayment } from "@/pay/history";
+import { LEDGER_PAGES, RefundError, checkLedger, checkRefund, parseRefundRef, parseRefundUri, readRefundLedger, refundCap } from "./request";
 
 const freighter = vi.hoisted(() => ({
   isConnected: vi.fn(),
@@ -178,6 +179,119 @@ describe("refund against the signed registry", () => {
   });
 });
 
+/** A successful payment operation as Horizon lists it with join=transactions. */
+let opId = 1000;
+const op = (from: string, to: string, amount: string, memo: string | null, o: { hash?: string; asset?: { code: string; issuer: string } } = {}) => ({
+  id: String(opId++),
+  type: "payment",
+  transaction_successful: true,
+  transaction_hash: o.hash ?? (opId.toString(16) + "e".repeat(64)).slice(0, 64),
+  created_at: "2026-10-25T17:55:23Z",
+  from,
+  to,
+  amount,
+  ...(o.asset ? { asset_type: "credit_alphanum4", asset_code: o.asset.code, asset_issuer: o.asset.issuer } : { asset_type: "native" }),
+  transaction: memo === null ? { memo_type: "none" } : { memo_type: "text", memo },
+});
+type Op = ReturnType<typeof op>;
+/** The records as HostPayment, as fetchPaymentsBetween reads them. */
+const hostPayments = (ops: Op[]): HostPayment[] =>
+  ops.map((o) => ({
+    id: o.id,
+    txHash: o.transaction_hash,
+    createdAt: o.created_at,
+    from: o.from,
+    to: o.to,
+    amount: o.amount,
+    assetCode: o.asset_type === "native" ? "XLM" : (o as { asset_code: string }).asset_code,
+    assetIssuer: o.asset_type === "native" ? null : (o as { asset_issuer: string }).asset_issuer,
+    memo: o.transaction.memo_type === "text" ? (o.transaction as { memo: string }).memo : null,
+  }));
+/** Horizon's /accounts/<host>/payments, newest first, one page. */
+const stubHorizon = (ops: Op[]) => {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      urls.push(url);
+      return new Response(JSON.stringify({ _embedded: { records: ops }, _links: { next: { href: `${url}&next` } } }));
+    }),
+  );
+  return urls;
+};
+
+describe("refund against the host's payments on the ledger", () => {
+  const SESSION = "8DY7RJ.FAFXJXBZ";
+  const HASH = "1a2b3c4d" + "0".repeat(56);
+  const TX_MEMO = encodeURIComponent("refund 8DY7RJ.tx1a2b3c4d");
+  // A look-alike of the payer: the same first and last 6 characters.
+  const LOOKALIKE = PAYER.slice(0, 6) + Keypair.random().publicKey().slice(6, -6) + PAYER.slice(-6);
+  const SPAMMER = Keypair.random().publicKey();
+  const ledger = (u: string, ops: Op[], complete = true) => checkLedger(parseRefundUri(u), station, hostPayments(ops), complete);
+
+  it("blocks a refund to an address that paid the host nothing under its REF", () => {
+    expect(ledger(uri("0.95"), [])).toEqual({ state: "no_payment", complete: true });
+    // Paid under another session, with no memo, to another account, in another asset, or by a look-alike.
+    expect(ledger(uri("0.95"), [op(PAYER, PUBLIC_HOST, "1.0000000", "8DY7RJ.K7M2QXAB")]).state).toBe("no_payment");
+    expect(ledger(uri("0.95"), [op(PAYER, PUBLIC_HOST, "1.0000000", null)]).state).toBe("no_payment");
+    expect(ledger(uri("0.95"), [op(PAYER, USDC.issuer, "1.0000000", SESSION)]).state).toBe("no_payment");
+    expect(ledger(uri("0.95"), [op(PAYER, PUBLIC_HOST, "1.0000000", SESSION, { asset: USDC })]).state).toBe("no_payment");
+    expect(ledger(uri("0.95"), [op(LOOKALIKE, PUBLIC_HOST, "1.0000000", SESSION)]).state).toBe("no_payment");
+    // The host's own payment under the session is not the payer's.
+    expect(ledger(uri("0.95"), [op(PUBLIC_HOST, PAYER, "1.0000000", SESSION)]).state).toBe("no_payment");
+    expect(ledger(uri("0.95"), [], false)).toEqual({ state: "no_payment", complete: false });
+  });
+
+  it("allows at most what the payer paid under the session, less what the host already sent it back", () => {
+    const paid = [op(PAYER, PUBLIC_HOST, "1.0000000", SESSION), op(PAYER, PUBLIC_HOST, "0.5000000", SESSION)];
+    expect(ledger(uri("1.5"), paid)).toMatchObject({ state: "ok", left: "1.5" });
+    expect(ledger(uri("0.95"), paid)).toMatchObject({ state: "ok", left: "1.5", refunds: [] });
+    expect(ledger(uri("1.5000001"), paid)).toMatchObject({ state: "more_than_paid", left: "1.5" });
+    // A smaller payment than the refund: the amount is not the payer's own money.
+    expect(ledger(uri("5.5"), [op(PAYER, PUBLIC_HOST, "1.0000000", SESSION)])).toMatchObject({ state: "more_than_paid", left: "1" });
+    // What the host already sent it with this refund's memo, in its asset, counts against it; anything else does not.
+    const sent = [op(PUBLIC_HOST, PAYER, "0.5000000", "refund 8DY7RJ.FAFXJXBZ"), op(PUBLIC_HOST, PAYER, "9.0000000", "rent"), op(PUBLIC_HOST, LOOKALIKE, "9.0000000", "refund 8DY7RJ.FAFXJXBZ")];
+    expect(ledger(uri("1"), [...sent, ...paid])).toMatchObject({ state: "ok", left: "1" });
+    expect(ledger(uri("1.0000001"), [...sent, ...paid])).toMatchObject({ state: "more_than_paid", left: "1" });
+  });
+
+  it("counts a session's payment below one ficha (underpaid, or after it closed) but never lets it cover more", () => {
+    // Address poisoning's 0.0001 XLM under a session's memo: at most that 0.0001 back to its own sender.
+    const dust = [op(LOOKALIKE, PUBLIC_HOST, "0.0001000", SESSION), op(PAYER, PUBLIC_HOST, "0.0001000", SESSION)];
+    expect(ledger(uri("0.95"), dust)).toMatchObject({ state: "more_than_paid", left: "0.0001" });
+    expect(ledger(uri("0.0001"), dust).state).toBe("ok");
+    expect(ledger(uri("0.3"), [op(PAYER, PUBLIC_HOST, "0.3000000", SESSION)]).state).toBe("ok");
+  });
+
+  it("matches a payment's REF by its transaction hash, from the payer, for at least one ficha (less is dust)", () => {
+    expect(ledger(uri("1", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", null, { hash: HASH })])).toMatchObject({ state: "ok", left: "1" });
+    expect(ledger(uri("1", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", "hello", { hash: HASH.toUpperCase() })]).state).toBe("ok");
+    expect(ledger(uri("1.5", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", null, { hash: HASH })]).state).toBe("more_than_paid");
+    // The same hash prefix, from another sender: not the payer's money.
+    expect(ledger(uri("1", TX_MEMO), [op(LOOKALIKE, PUBLIC_HOST, "1.0000000", null, { hash: HASH })]).state).toBe("no_payment");
+    // Another transaction from the payer.
+    expect(ledger(uri("1", TX_MEMO), [op(PAYER, PUBLIC_HOST, "1.0000000", null, { hash: "1a2b3c4e" + "0".repeat(56) })]).state).toBe("no_payment");
+    // Dust: below one ficha (0.5 XLM) and naming no session, the station never refunds it.
+    expect(ledger(uri("0.0001", TX_MEMO), [op(PAYER, PUBLIC_HOST, "0.0001000", null, { hash: HASH })]).state).toBe("no_payment");
+    expect(ledger(uri("0.4999999", TX_MEMO), [op(PAYER, PUBLIC_HOST, "0.4999999", null, { hash: HASH })]).state).toBe("no_payment");
+    expect(ledger(uri("0.5", TX_MEMO), [op(PAYER, PUBLIC_HOST, "0.5000000", null, { hash: HASH })]).state).toBe("ok");
+  });
+
+  it("reads the host's payments on the refund's network, with their transactions' memos", async () => {
+    const urls = stubHorizon([op(PAYER, PUBLIC_HOST, "1.0000000", SESSION), op(SPAMMER, PUBLIC_HOST, "0.0001000", null)]);
+    try {
+      expect(await readRefundLedger(parseRefundUri(uri("0.95")), station)).toMatchObject({ state: "ok", left: "1" });
+      expect(urls[0]).toBe(`https://horizon.stellar.org/accounts/${PUBLIC_HOST}/payments?join=transactions&order=desc&limit=200`);
+      // A full page each time: it stops after LEDGER_PAGES, and says it did not read them all.
+      stubHorizon(Array.from({ length: 200 }, () => op(SPAMMER, PUBLIC_HOST, "0.0001000", null)));
+      expect(await readRefundLedger(parseRefundUri(uri("0.95")), station)).toEqual({ state: "no_payment", complete: false });
+      expect((fetch as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(LEDGER_PAGES);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("Freighter", () => {
   beforeEach(() => {
     for (const f of Object.values(freighter)) f.mockReset();
@@ -228,11 +342,14 @@ describe("Freighter", () => {
 
 describe("the refund transaction", () => {
   const host = Keypair.random();
+  const hosted = { ...station, host_key: host.publicKey() };
   let submitted: Transaction[];
 
   beforeEach(() => {
     for (const f of Object.values(freighter)) f.mockReset();
     submitted = [];
+    // The payer's 2.5 XLM to this host under the session, on the ledger.
+    stubHorizon([op(PAYER, host.publicKey(), "2.5000000", "8DY7RJ.FAFXJXBZ")]);
     vi.spyOn(Horizon.Server.prototype, "loadAccount").mockImplementation(async (id: string) => new Account(id, "41") as unknown as Horizon.AccountResponse);
     vi.spyOn(Horizon.Server.prototype, "feeStats").mockResolvedValue({
       last_ledger_base_fee: "100",
@@ -252,7 +369,10 @@ describe("the refund transaction", () => {
     });
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it("pays the payer from the host: amount, asset, memo text, network and a 180 s time bound", async () => {
     const r = parseRefundUri(uri());
@@ -293,7 +413,7 @@ describe("the refund transaction", () => {
 
   it("has Freighter sign it as the host on the refund's network, then submits that transaction once", async () => {
     const r = parseRefundUri(uri());
-    expect(await sendRefund(r, host.publicKey())).toEqual({ hash: "f".repeat(64), ledger: 7 });
+    expect(await sendRefund(r, hosted)).toEqual({ hash: "f".repeat(64), ledger: 7 });
     expect(freighter.signTransaction).toHaveBeenCalledTimes(1);
     expect(freighter.signTransaction.mock.calls[0][1]).toEqual({ networkPassphrase: Networks.PUBLIC, address: host.publicKey() });
     expect(submitted).toHaveLength(1);
@@ -304,10 +424,21 @@ describe("the refund transaction", () => {
     expect(host.verify(sent.hash(), sent.signatures[0].signature)).toBe(true);
   });
 
+  it("reads the ledger again right before building, and builds nothing it does not allow", async () => {
+    const r = parseRefundUri(uri("2.5000001"));
+    const err = await sendRefund(r, hosted).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LedgerBlockError);
+    expect(err).toMatchObject({ check: { state: "more_than_paid", left: "2.5" } });
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining(`/accounts/${host.publicKey()}/payments?join=transactions`), expect.anything());
+    expect(Horizon.Server.prototype.loadAccount).not.toHaveBeenCalled();
+    expect(freighter.signTransaction).not.toHaveBeenCalled();
+    expect(submitted).toEqual([]);
+  });
+
   it("submits nothing when Freighter refuses, signs another transaction, or signs as another account", async () => {
     const r = parseRefundUri(uri());
     freighter.signTransaction.mockResolvedValueOnce({ signedTxXdr: "", signerAddress: "", error: { code: -4, message: "The user rejected this request." } });
-    await expect(sendRefund(r, host.publicKey())).rejects.toMatchObject({ code: "refused" });
+    await expect(sendRefund(r, hosted)).rejects.toMatchObject({ code: "refused" });
 
     // A payment to another address, signed by the host: not the one the page showed.
     const stranger = Keypair.random();
@@ -324,21 +455,21 @@ describe("the refund transaction", () => {
       forged.sign(host);
       return { signedTxXdr: forged.toXDR(), signerAddress: host.publicKey() };
     });
-    await expect(sendRefund(r, host.publicKey())).rejects.toMatchObject({ code: "bad_signature", message: "another transaction" });
+    await expect(sendRefund(r, hosted)).rejects.toMatchObject({ code: "bad_signature", message: "another transaction" });
 
     freighter.signTransaction.mockImplementationOnce(async (xdr: string, opts: { networkPassphrase: string }) => {
       const tx = TransactionBuilder.fromXDR(xdr, opts.networkPassphrase) as Transaction;
       tx.sign(stranger);
       return { signedTxXdr: tx.toXDR(), signerAddress: host.publicKey() };
     });
-    await expect(sendRefund(r, host.publicKey())).rejects.toMatchObject({ code: "bad_signature", message: "no signature by the host" });
+    await expect(sendRefund(r, hosted)).rejects.toMatchObject({ code: "bad_signature", message: "no signature by the host" });
 
     freighter.signTransaction.mockImplementationOnce(async (xdr: string, opts: { networkPassphrase: string }) => {
       const tx = TransactionBuilder.fromXDR(xdr, opts.networkPassphrase) as Transaction;
       tx.sign(host);
       return { signedTxXdr: tx.toXDR(), signerAddress: stranger.publicKey() };
     });
-    await expect(sendRefund(r, host.publicKey())).rejects.toMatchObject({ code: "bad_signature", message: "signed by another account" });
+    await expect(sendRefund(r, hosted)).rejects.toMatchObject({ code: "bad_signature", message: "signed by another account" });
     expect(submitted).toEqual([]);
   });
 });
@@ -355,9 +486,21 @@ describe("the /refund page", () => {
 
   it("has every message it shows, in every language", () => {
     const states = ["no_station", "no_registry", "unknown_station", "inactive", "custody", "asset_mismatch", "over_cap"];
-    const keys = [...states.map((s) => `block.${s}`), "badLink", "wrongNetwork", "wrongAccount", "notInstalled", "refused", "badSignature", "unknownOutcome"];
+    const ledger = ["no_payment", "more_than_paid"];
+    const keys = [
+      ...states.map((s) => `block.${s}`),
+      ...ledger.map((s) => `ledger.${s}`),
+      ...["unreadable", "notAll", "dust", "ok", "paid", "refunds"].map((k) => `ledger.${k}`),
+      "badLink",
+      "wrongNetwork",
+      "wrongAccount",
+      "notInstalled",
+      "refused",
+      "badSignature",
+      "unknownOutcome",
+    ];
     const page = read("../routes/refund.tsx");
-    for (const s of states) expect(page, s).toContain(`case "${s}":`);
+    for (const s of [...states, ...ledger]) expect(page, s).toContain(`case "${s}":`);
     for (const lang of LANGS) for (const k of keys) expect(DICTS[lang][`refund.${k}`], `${lang} ${k}`).toBeTruthy();
   });
 });

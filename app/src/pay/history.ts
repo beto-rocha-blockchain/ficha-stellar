@@ -94,6 +94,15 @@ export async function fetchMyPayments(net: NetworkConfig, account: string, maxPa
   return (await readPayments(net, account, { maxPages }, (r) => r.from === account)).payments;
 }
 
+/**
+ * The payments between `account` and `other`, either way (newest first),
+ * read from `account`'s list: what a payer paid a host and what the host
+ * sent back (src/refund/request.ts). Never one from an account to itself.
+ */
+export async function fetchPaymentsBetween(net: NetworkConfig, account: string, other: string, maxPages: number): Promise<{ payments: HostPayment[]; complete: boolean }> {
+  return readPayments(net, account, { maxPages }, (r) => r.from !== r.to && ((r.from === other && r.to === account) || (r.from === account && r.to === other)));
+}
+
 const sessionPayment = (hostKey: string, memo: string) => (r: HorizonPayment) =>
   r.to === hostKey && r.transaction?.memo_type === "text" && r.transaction.memo === memo;
 

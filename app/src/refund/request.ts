@@ -13,9 +13,12 @@
  * The station ID is resolved in the signed registry of the URI's network:
  * the signer must be that station's host_key. The destination is the URI's,
  * which the station writes from its own log: never one from a wallet's
- * history (address poisoning sends the host look-alike payments).
+ * history (address poisoning sends the host look-alike payments). The
+ * ledger only limits the amount (checkLedger): what that destination paid
+ * the host under REF, less what the host already sent it back.
  */
 import { NETWORKS, type NetworkConfig } from "@/config";
+import { fetchPaymentsBetween, type HostPayment } from "@/pay/history";
 import { isCustody, stationById, type Registry, type Station } from "@/registry/verify";
 import { compareAmounts, fromStroops, toStroops } from "@/stellar/amount";
 import { sameAsset } from "@/stellar/horizon";
@@ -122,4 +125,52 @@ export function checkRefund(r: RefundRequest, reg: Registry | null): RefundCheck
   const cap = refundCap(station);
   if (compareAmounts(r.amount, cap) > 0) return { state: "over_cap", station, cap };
   return { state: "ok", station, cap };
+}
+
+/** Pages of the host's payments read for a refund, 200 each, newest first. */
+export const LEDGER_PAGES = 10;
+
+export type LedgerCheck =
+  /** `paid`: the destination's payments to the host under REF; `refunds`: the host's to it with this memo; `left` covers the amount. */
+  | { state: "ok"; paid: HostPayment[]; refunds: HostPayment[]; left: string }
+  /** No payment by the destination to the host under REF, in the refund's asset. `complete`: the host's whole list was read. */
+  | { state: "no_payment"; complete: boolean }
+  /** The amount is more than `left`: what the destination paid under REF, less what was refunded. */
+  | { state: "more_than_paid"; paid: HostPayment[]; refunds: HostPayment[]; left: string };
+
+const total = (ps: HostPayment[]) => ps.reduce((s, p) => s + toStroops(p.amount), 0n);
+
+/**
+ * The refund against the payments between the host and the destination
+ * (fetchPaymentsBetween): the destination must have paid the host under
+ * REF, in the refund's asset, at least the amount plus what the host has
+ * already sent it with the memo "refund <REF>". Under REF: with the session
+ * as memo, or, for a payment's REF, in a transaction whose hash starts with
+ * its hex and for at least one ficha (less, naming none of the station's
+ * sessions, is dust, which the station never refunds). A session's count
+ * whatever their amount: below one ficha, under a session the station
+ * served, it is underpaid or an orphan, refunded in full. A link from
+ * anywhere can so at most return a payer's own money to that payer. Only
+ * "ok" may be signed.
+ */
+export function checkLedger(r: RefundRequest, station: Pick<Station, "host_key" | "ficha_price">, payments: HostPayment[], complete: boolean): LedgerCheck {
+  const host = station.host_key;
+  const dest = r.req.destination;
+  const ref = r.ref;
+  const inAsset = (p: HostPayment) => sameAsset(r.req.asset, { code: p.assetCode, issuer: p.assetIssuer });
+  const underRef = (p: HostPayment) =>
+    ref.kind === "session" ? p.memo === r.refText : p.txHash.toLowerCase().startsWith(ref.tx) && compareAmounts(p.amount, station.ficha_price) >= 0;
+  const paid = payments.filter((p) => p.from === dest && p.to === host && inAsset(p) && underRef(p));
+  const refunds = payments.filter((p) => p.from === host && p.to === dest && inAsset(p) && p.memo === r.req.memo);
+  if (paid.length === 0) return { state: "no_payment", complete };
+  const rest = total(paid) - total(refunds);
+  const left = fromStroops(rest > 0n ? rest : 0n);
+  if (toStroops(r.amount) > rest) return { state: "more_than_paid", paid, refunds, left };
+  return { state: "ok", paid, refunds, left };
+}
+
+/** checkLedger on the host's newest payments, on the refund's network. Throws when Horizon cannot be read. */
+export async function readRefundLedger(r: RefundRequest, station: Pick<Station, "host_key" | "ficha_price">): Promise<LedgerCheck> {
+  const { payments, complete } = await fetchPaymentsBetween(r.net, station.host_key, r.req.destination, LEDGER_PAGES);
+  return checkLedger(r, station, payments, complete);
 }
