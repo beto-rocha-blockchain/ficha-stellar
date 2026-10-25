@@ -16,7 +16,7 @@
 // scripts/publish-site.mjs copies the result into a checkout of the private
 // site repository the Vercel project deploys.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkRegistries, registryFiles } from "./registries.mjs";
@@ -45,6 +45,15 @@ function registries(check) {
 // Before building: a registry not signed by its network's pinned key (no
 // .sig, another key, an edit after signing) fails here, not on the site.
 registries(() => registryFiles(registry));
+// The public site talks only to SDF's endpoints (src/config.ts defaults): a
+// VITE_HORIZON_* or VITE_RPC_* left in the shell or in an app/.env* file
+// would be built into it, and /refund trusts that Horizon for what a payer paid.
+const endpoints = Object.keys(process.env).filter((k) => /^VITE_(HORIZON|RPC)_/.test(k));
+const envFiles = readdirSync(app).filter((f) => /^\.env(\..+)?$/.test(f) && !f.endsWith(".example"));
+if (endpoints.length || envFiles.length) {
+  console.error(`[build-site] not building the public site with custom endpoints: ${[...endpoints, ...envFiles].join(", ")}`);
+  process.exit(1);
+}
 node("scripts/sync-assets.mjs");
 node("node_modules/vite/bin/vite.js", ["build", "--outDir", "dist-site", "--emptyOutDir"], { VITE_BASE: SITE_BASE });
 

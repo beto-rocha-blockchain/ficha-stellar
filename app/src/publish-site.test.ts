@@ -242,6 +242,24 @@ describe("build-site", () => {
     expect(t.stdout).toContain("[build-site] registry: stations.json, signed");
   });
 
+  it("fails, before building anything, with a custom Horizon or RPC in the shell or an app/.env file", () => {
+    rmSync(dist(), { recursive: true, force: true });
+    const shell = spawnSync(process.execPath, [join(root, "app", "scripts", "build-site.mjs")], {
+      encoding: "utf8", env: { ...process.env, VITE_HORIZON_PUBLIC: "https://horizon.example" },
+    });
+    expect(shell.status).not.toBe(0);
+    expect(shell.stderr).toContain("[build-site] not building the public site with custom endpoints: VITE_HORIZON_PUBLIC");
+    write(join(root, "app", ".env.production"), "VITE_RPC_TESTNET=https://rpc.example\n");
+    try {
+      const file = build();
+      expect(file.status).not.toBe(0);
+      expect(file.stderr).toContain("custom endpoints: .env.production");
+    } finally {
+      rmSync(join(root, "app", ".env.production"), { force: true });
+    }
+    expect(existsSync(dist())).toBe(false);
+  });
+
   it("fails, before building anything, on a stations.public.json without its .sig", () => {
     write(reg("stations.public.json"), PUBLIC);
     try {
