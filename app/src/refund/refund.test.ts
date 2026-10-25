@@ -558,6 +558,19 @@ describe("the /refund page", () => {
     expect(reloadIsSafe("/refund", "locked")).toBe(false);
   });
 
+  it("never vouches for where a link came from, and says the station shows the payer's first and last 6 only", () => {
+    const pt = DICTS["pt-BR"];
+    const en = DICTS.en;
+    // Anyone can make a /refund link: the page says what it asks, not where it came from.
+    expect(pt["refund.intro"]).toContain("Este link pede");
+    expect(en["refund.intro"]).toContain("This link asks");
+    expect(en["refund.intro"]).toContain("Sign only a refund you opened from the button on the station screen");
+    for (const k of ["refund.intro", "refund.to"]) expect(`${pt[k]} ${en[k]}`, k).not.toMatch(/registr|logged|log/);
+    expect(pt["refund.compare"]).toMatch(/6 primeiros e 6 últimos/);
+    expect(en["refund.compare"]).toMatch(/only by its first 6 and last 6/);
+    expect(en["refund.mobileHint"]).toContain("Pay each refund once");
+  });
+
   it("has every message it shows, in every language", () => {
     const states = ["no_station", "no_registry", "unknown_station", "inactive", "custody", "asset_mismatch", "over_cap"];
     const ledger = ["no_payment", "more_than_paid", "refunded"];
