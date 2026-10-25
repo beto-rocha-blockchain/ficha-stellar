@@ -1,8 +1,27 @@
 /target
 .env
+# Every other env file stays local too; only the documented examples are tracked.
+.env.*
+!.env*.example
 .venv/
+venv/
 __pycache__/
-sessions.jsonl
+node_modules/
+/dist/
+/dist-site/
+.vercel/
+# Session logs hold refund-chain seeds; never commit one, under any name.
+sessions*.jsonl
+# Keys never live in the repo: secret files, key folders, Android signing.
+*.key
+keys/
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+keystore.properties
+google-services.json
 .horizon_cursor*
 .escrow_cursor*
 # Free emergency minutes: the day's salt and ledger (freeminutes.py)

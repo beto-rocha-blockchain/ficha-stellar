@@ -7,3 +7,8 @@ public/registry/
 public/icons/
 public/favicon.svg
 *.local
+# Build-time settings for other targets (VITE_* values end up in the public bundle)
+.env
+.env.*
+!.env*.example
+.tanstack/
