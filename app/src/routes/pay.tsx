@@ -203,7 +203,7 @@ function PayForm({ req, memo }: { req: PayRequest; memo: FichaMemo }) {
     );
   }
 
-  const check = checkAgainstRegistry(req, memo, reg.registry);
+  const check = checkAgainstRegistry(req, memo, reg.registry, net);
   const station = check.state === "ok" || check.state === "legacy" ? check.station : null;
 
   let blockedText: string | null = null;
@@ -217,7 +217,8 @@ function PayForm({ req, memo }: { req: PayRequest; memo: FichaMemo }) {
   if (check.state === "inactive") blockedText = t("pay.inactive", { id: check.stationId });
   if (check.state === "custody_only") blockedText = t("pay.custodyOnly", { id: check.stationId });
   if (check.state === "no_registry") blockedText = t("pay.noRegistry");
-  // Legacy without a registry match: only the QR's own amount, one ficha.
+  if (check.state === "unlisted") blockedText = t("pay.unlisted");
+  // Legacy without a registry match (testnet only): only the QR's own amount, one ficha.
   if (check.state === "legacy" && !station && !req.amount) blockedText = t("pay.notFicha");
   if (!blockedText && ended) blockedText = t("pay.sessionEnded");
 

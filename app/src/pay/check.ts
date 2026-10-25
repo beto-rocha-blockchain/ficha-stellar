@@ -2,7 +2,10 @@
  * A station's pay QR checked against the signed registry (contract §4)
  * before the confirm button is enabled. A custody station is paid only by
  * deposit, from its own pay link (src/routes/p.tsx): its SEP-0007 QR is refused.
+ * Off the testnet the money is real: a QR without a station code is paid only
+ * to the one station the registry lists at its address, at that station's price.
  */
+import type { NetworkConfig } from "@/config";
 import { isCustody, maxFichas, stationById, stationsByHostKey, type Registry, type Station } from "@/registry/verify";
 import { compareAmounts, toStroops } from "@/stellar/amount";
 import { sameAsset } from "@/stellar/horizon";
@@ -18,7 +21,10 @@ export type Check =
   | { state: "inactive"; stationId: string }
   /** The registry sells this station in custody mode: never a direct payment to its host. */
   | { state: "custody_only"; stationId: string }
-  | { state: "no_registry"; stationId: string }
+  /** stationId null: a QR without a station code, off the testnet. */
+  | { state: "no_registry"; stationId: string | null }
+  /** Off the testnet, a QR without a station code whose address is not exactly one listed station's. */
+  | { state: "unlisted" }
   | { state: "legacy"; station: Station | null };
 
 /**
@@ -31,8 +37,12 @@ function priceDiffers(req: PayRequest, st: Station): boolean {
   return req.amount !== null && compareAmounts(req.amount, st.ficha_price) !== 0;
 }
 
-export function checkAgainstRegistry(req: PayRequest, memo: FichaMemo, reg: Registry | null): Check {
+export function checkAgainstRegistry(req: PayRequest, memo: FichaMemo, reg: Registry | null, net: Pick<NetworkConfig, "id">): Check {
   if (memo.kind === "legacy") {
+    // On the testnet a legacy QR may still be paid at its own amount after
+    // "I understand the risk"; with real money, never on the QR's word alone.
+    const listedOnly = net.id !== "testnet";
+    if (listedOnly && !reg) return { state: "no_registry", stationId: null };
     // A custody station always has a station ID: a QR without one is not its.
     const known = stationsByHostKey(reg, req.destination).filter((s) => sameAsset(s.asset, req.asset) && !isCustody(s));
     // active: false is how the operator stops payments to a station: a QR
@@ -40,6 +50,7 @@ export function checkAgainstRegistry(req: PayRequest, memo: FichaMemo, reg: Regi
     if (known.length > 0 && known.every((s) => !s.active)) return { state: "inactive", stationId: known.map((s) => s.id).join(", ") };
     const hits = known.filter((s) => s.active);
     const station = hits.length === 1 ? hits[0] : null;
+    if (listedOnly && !station) return { state: "unlisted" };
     if (station && priceDiffers(req, station)) return { state: "price_mismatch", station };
     return { state: "legacy", station };
   }
