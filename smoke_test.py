@@ -838,6 +838,28 @@ def test_public(tmp: Path) -> None:
               "a version that pins no public key: an empty REGISTRY_KEY refused, another one taken, and the testnet "
               "one's refusal says none is pinned")
 
+    from dotenv import dotenv_values
+    example = dotenv_values(root / ".env.public.example")
+    fill = {"STATION_ID": "K7M2QX", "HOST_PUBLIC_KEY": env["HOST_PUBLIC_KEY"], "FICHA_PRICE": "0.5",
+            "FICHA_MINUTES": "1", "MAX_SESSION_MINUTES": "10", "SESSION_LOG": str(tmp / "public.jsonl"),
+            "CURSOR_DIR": str(tmp)}
+    placeholders = {k for k, v in example.items() if v == "G..." or "<" in (v or "")}
+    try:
+        load_env(**example, ADB_SERIAL=ADB_SERIAL)
+        shipped = ""
+    except config.ConfigError as exc:
+        shipped = str(exc)
+    # The hardware stays in .env (the header): the phone's address stands for it.
+    pub = load_env(**{**example, **fill, "ADB_SERIAL": ADB_SERIAL})
+    check(placeholders == set(fill) and shipped != "" and pub.network == "public" and not pub.mock
+          and not pub.mock_payment and pub.payment_mode == "direct" and pub.is_native and pub.charge_verify
+          and pub.horizon_url == "https://horizon.stellar.org" and pub.registry_check
+          and pub.registry_key == PUBLIC_REGISTRY_KEY and pub.courtesy_seconds == 0 and not pub.free_on
+          and pub.host == "127.0.0.1" and pub.session_log == tmp / "public.jsonl" and pub.cursor_dir == tmp
+          and not any(re.fullmatch(r"S[A-Z2-7]{55}", v or "") for v in example.values()),
+          ".env.public.example: refused as shipped; its placeholders filled, a direct public station on native XLM "
+          "with the pinned registry key, no mock, no courtesy, no portal, and no secret in it")
+
     def offline(url: str):
         raise registry_check.Unavailable("ConnectError")
 

@@ -291,6 +291,10 @@ rules: [free-minutes.md](free-minutes.md).
 
 ## 4. Switching testnet → public
 
+`.env.public.example` has the settings below for a direct station, applied
+on top of `.env` (which keeps the hardware; its header says how), with
+`<...>` for this station's own values. No secret goes in it.
+
 1. `STELLAR_NETWORK=public` (Horizon URL follows; `HORIZON_URL` only overrides,
    must be https, and the testnet Horizon is refused on public). On any
    network, payments are read only once Horizon's root says it serves that
