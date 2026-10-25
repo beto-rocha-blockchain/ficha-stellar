@@ -389,9 +389,14 @@ due, shows it on its screen and sees it paid; the host signs:
      its host key) and the host's payments on the ledger (at most what
      that payer paid the host under the ref, and nothing once the host has
      sent it any refund with that memo: pay a remainder from the phone),
-     and asks the Freighter extension to sign it as the host account. Only
-     the station's own card says what is due: never sign a `/refund` link
-     that came from anywhere else.
+     and asks the Freighter extension to sign it as the host account. It
+     refuses more than one whole session plus one ficha (`ficha_price` ×
+     `max_session_minutes` / `ficha_minutes` + one ficha: 5.5 XLM at
+     8DY7RJ); a larger refund (capped time, a big orphan) is paid from the
+     QR. Only the station's own card says what is due: never sign a
+     `/refund` link that came from anywhere else. The card asks for
+     everything due under its ref to its payer at once, so one payment
+     clears it.
 3. **The station marks it refunded** when Horizon shows a payment from the
    host with memo `refund <REF>`, to that refund's payer and in its asset:
    a `refunded` line in the log, a notice on screen, and the card moves on
