@@ -109,6 +109,55 @@ def sep7_uri(cfg: Config, memo: str, amount: Decimal) -> str:
     return "web+stellar:pay?" + urlencode(params, quote_via=quote)
 
 
+# A refund the host pays back to a payer carries the text memo "refund <REF>"
+# (docs/station-app-contract.md, section 3.1): REF is the session ID, or, for
+# a payment whose memo names none of this station's sessions, its transaction.
+REFUND_MEMO_PREFIX = "refund "
+
+
+def refund_memo(ref: str) -> str:
+    memo = REFUND_MEMO_PREFIX + ref
+    validate_memo(memo)
+    return memo
+
+
+def refund_ref_of(memo: str | None) -> str | None:
+    """The REF a refund's memo names, or None when it is no refund's memo."""
+    if not memo or not memo.startswith(REFUND_MEMO_PREFIX):
+        return None
+    return memo[len(REFUND_MEMO_PREFIX):] or None
+
+
+def refund_tx_ref(cfg: Config, tx_hash: str) -> str:
+    """The REF of a refund for a payment whose memo names none of this
+    station's sessions: "<STATION_ID>.tx<first 8 hex of its hash>", or
+    "tx<first 12 hex>" when that does not fit the memo (no STATION_ID)."""
+    h = tx_hash.removeprefix("debug-")  # MOCK_PAYMENT: never on the ledger
+    ref = f"{cfg.station_id}.tx{h[:8]}"
+    if cfg.station_id and len((REFUND_MEMO_PREFIX + ref).encode("utf-8")) <= MEMO_TEXT_MAX_BYTES:
+        return ref
+    return f"tx{h[:12]}"
+
+
+def refund_uri(cfg: Config, payer: str, amount: Decimal, ref: str, asset_code: str = "XLM",
+               asset_issuer: str | None = None) -> str:
+    """SEP-0007 pay URI of a refund: the HOST pays `amount` back to `payer`,
+    the payer written in the station's log (never an address from a wallet's
+    history), with the memo "refund <REF>". As sep7_uri(): asset_code and
+    asset_issuer only for an issued asset, network_passphrase on every
+    network but public. The host's wallet scans it, or the Ficha site's
+    /refund page builds the payment from it."""
+    memo = refund_memo(ref)
+    params: list[tuple[str, str]] = [("destination", payer), ("amount", format_amount(amount))]
+    if asset_issuer:
+        params += [("asset_code", asset_code), ("asset_issuer", asset_issuer)]
+    params += [("memo", memo), ("memo_type", "MEMO_TEXT")]
+    if cfg.network != "public":
+        params.append(("network_passphrase", NETWORK_PASSPHRASES[cfg.network]))
+    params.append(("msg", f"Ficha refund · {ref}"))
+    return "web+stellar:pay?" + urlencode(params, quote_via=quote)
+
+
 @dataclass(frozen=True)
 class Payment:
     tx_hash: str

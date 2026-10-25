@@ -46,7 +46,7 @@ import httpx
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 import stellar_sdk
-from stellar_sdk import Keypair, Network, scval
+from stellar_sdk import Keypair, Network, StrKey, scval
 from stellar_sdk.exceptions import SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import EventInfo, GetEventsResponse, GetLatestLedgerResponse
 
@@ -58,7 +58,9 @@ from meter import MockMeter
 from qr import last_receipt_qr, pay_qr, receipt_payload, receipt_qr, wifi_payload, wifi_qr
 from relay import MockRelay
 from session import SessionLog, State, Station, mmss
-from stellar import HorizonWatcher, Payment, sep7_msg, sep7_uri, validate_memo
+from stellar import (
+    HorizonWatcher, Payment, refund_memo, refund_ref_of, refund_tx_ref, refund_uri, sep7_msg, sep7_uri, validate_memo,
+)
 from supervisor import end_process
 from tools import registry
 
@@ -1230,6 +1232,45 @@ def test_money(tmp: Path) -> None:
     check(not ru.snap()["can_add"], "(14) usb_vbus before the countdown starts: paid time counts toward the limit")
     check("d.can_add === false" in html and "body.full .qrs" in html,
           "(14) the screen hides the pay QR and the price note at the session limit")
+
+
+def account(n: int) -> str:
+    """A valid account ID made of fixed bytes: no key is generated for it."""
+    return StrKey.encode_ed25519_public_key(bytes([n]) * 32)
+
+
+def test_refund_uri(tmp: Path) -> None:
+    print("the SEP-0007 refund URI the host's wallet pays")
+    r = Rig(tmp, station_id="K7M2QX")
+    payer = account(1)
+    pub = on_public(r.cfg, station_id="8DY7RJ")
+    uri = refund_uri(pub, payer, Decimal("0.9500000"), "8DY7RJ.FAFXJXBZ")
+    check(uri == f"web+stellar:pay?destination={payer}&amount=0.95&memo=refund%208DY7RJ.FAFXJXBZ&memo_type=MEMO_TEXT"
+                 "&msg=Ficha%20refund%20%C2%B7%208DY7RJ.FAFXJXBZ"
+          and len(refund_memo("8DY7RJ.FAFXJXBZ").encode()) == 22,
+          "public, native: web+stellar:pay?destination=<payer>&amount (no trailing zeros)&memo=refund <session>"
+          "&memo_type=MEMO_TEXT&msg, no network_passphrase (22-byte memo)")
+    ref = refund_tx_ref(r.cfg, "1a2b3c4d5e6f7a8b9c0d")
+    uri = refund_uri(replace(r.cfg, asset_code="USDC", asset_issuer=HOST), payer, Decimal("2.1166666"), ref,
+                     "USDC", HOST)
+    check(ref == "K7M2QX.tx1a2b3c4d" and uri == (
+              f"web+stellar:pay?destination={payer}&amount=2.1166666&asset_code=USDC&asset_issuer={HOST}"
+              "&memo=refund%20K7M2QX.tx1a2b3c4d&memo_type=MEMO_TEXT"
+              "&network_passphrase=Test%20SDF%20Network%20%3B%20September%202015"
+              "&msg=Ficha%20refund%20%C2%B7%20K7M2QX.tx1a2b3c4d"),
+          "testnet, an issued asset: asset_code and asset_issuer, and network_passphrase; a payment naming no "
+          "session refunds as <STATION_ID>.tx<first 8 hex of its hash>")
+    q = query(uri)
+    check(q["memo"] == "refund K7M2QX.tx1a2b3c4d" and q["network_passphrase"] == config.NETWORK_PASSPHRASES["testnet"]
+          and "network_passphrase" not in query(refund_uri(pub, payer, Decimal(1), "8DY7RJ.FAFXJXBZ")),
+          "... read back: the memo and the testnet passphrase; none on public")
+    legacy = refund_tx_ref(replace(r.cfg, station_id=""), "1a2b3c4d5e6f7a8b9c0d")
+    check(legacy == "tx1a2b3c4d5e6f" and refund_tx_ref(r.cfg, "debug-0123456789ab") == "K7M2QX.tx01234567"
+          and max(len(refund_memo(x).encode()) for x in (ref, legacy, "K7M2QX.F3H9TXAB")) <= 28,
+          "no STATION_ID: tx<first 12 hex>; every refund memo fits a text memo (28 bytes)")
+    check(refund_ref_of("refund 8DY7RJ.FAFXJXBZ") == "8DY7RJ.FAFXJXBZ"
+          and all(refund_ref_of(m) is None for m in (None, "", "refund ", "8DY7RJ.FAFXJXBZ", "Refund 8DY7RJ.F")),
+          "a refund's memo is exactly 'refund <REF>'")
 
 
 # The network each of SDF's Horizons says it serves, at its root.
@@ -4674,7 +4715,7 @@ def test_free_rollover(tmp: Path) -> None:
 if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
-             ("i", test_money), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
+             ("i", test_money), ("i2", test_refund_uri), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
              ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
              ("m4", test_horizon_network), ("m5", test_public_rechecks),
              ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
