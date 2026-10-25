@@ -1629,13 +1629,13 @@ def test_refund_screen(tmp: Path) -> None:
     first = f"K7M2QX.tx{r.n:08x}"
     paid_by(r, b, "2", memo="K7M2QX.F3456789")
     newest = f"K7M2QX.tx{r.n:08x}"
-    hidden = {"count": 2, "seconds_left": None}
+    hidden = {"count": 2, "seconds_left": None, "unseen": None}
     check(r.snap()["refund_due"] == hidden and refund_qr(r.cfg, hidden) == hidden,
           "due, not asked for: how many only (the footer), no URI and no QR: a pay request any wallet can pay "
           "(a customer who scanned it for the pay QR would pay the previous payer) is never on screen unasked")
     st.show_refund()
     due = r.snap()["refund_due"]
-    check(due == {"count": 2, "seconds_left": 60, "ref": newest, "payer": b, "amount": "2", "asset": "XLM",
+    check(due == {"count": 2, "seconds_left": 60, "unseen": None, "ref": newest, "payer": b, "amount": "2", "asset": "XLM",
                   "asset_issuer": None, "uri": refund_uri(r.cfg, b, Decimal(2), newest)},
           "R: the newest refund due, its URI, and how many are due, for 60 s")
     card = refund_qr(r.cfg, due)
@@ -1658,22 +1658,40 @@ def test_refund_screen(tmp: Path) -> None:
     r.tick(30)
     left = r.snap()["refund_due"]["seconds_left"]
     r.tick(30)
-    check(left == 30 and r.snap()["refund_due"] == {"count": 1, "seconds_left": None},
+    check(left == 30 and r.snap()["refund_due"] == {"count": 1, "seconds_left": None, "unseen": None},
           "it shows for a minute, counting down, then hides by itself")
     st.show_refund()
     st.show_refund()
-    check(r.snap()["refund_due"] == {"count": 1, "seconds_left": None}, "R again hides it")
+    check(r.snap()["refund_due"] == {"count": 1, "seconds_left": None, "unseen": None}, "R again hides it")
     st.show_refund()
     r.relay.error = "open failed: write timeout"
-    hid = r.snap()["refund_due"] == {"count": 1, "seconds_left": None}
+    hid = r.snap()["refund_due"] == {"count": 1, "seconds_left": None, "unseen": None}
     st.show_refund()
     check(hid and r.snap()["notice"].startswith("Out of service (relay: open failed: write timeout)")
           and r.snap()["refund_due"]["seconds_left"] is None,
           "out of service (no pay QR): it hides, and R does not show it, so it is never the only QR on screen")
     r.relay.error = None
+    check(r.snap()["refund_due"]["seconds_left"] is None, "back in service: still hidden, never back by itself")
+    st.watch_horizon()  # main.py does, on any network
+    st.show_refund()
+    check(r.snap()["refund_due"] == {"count": 1, "seconds_left": None, "unseen": "horizon: not read yet"}
+          and r.snap()["notice"] == "Refunds paid now are not seen (horizon: not read yet): do not pay one again "
+                                    "until this clears",
+          "Horizon not read yet (testnet too): a refund paid now would not be seen paid, so none shows; R and the "
+          "footer say not to pay one again")
+    st.on_horizon()
+    st.show_refund()
+    was = r.snap()["refund_due"]["seconds_left"]
+    r.tick(int(max(10, 3 * r.cfg.horizon_poll_seconds)) + 1)
+    due = r.snap()["refund_due"]
+    check(was == 60 and due["seconds_left"] is None and due["unseen"].startswith("horizon: not read for "),
+          "shown, then Horizon not read for a while: it hides (paid from the phone meanwhile, the card would stay "
+          "up as if it had failed, inviting a second payment)")
+    st.on_horizon()
+    check(r.snap()["refund_due"]["seconds_left"] is None, "... nor once Horizon is read again: only R shows it")
     st.show_refund()
     paid_by(r, b, "1")
-    check(st.state == State.CHARGING and r.snap()["refund_due"] == {"count": 1, "seconds_left": None},
+    check(st.state == State.CHARGING and r.snap()["refund_due"] == {"count": 1, "seconds_left": None, "unseen": None},
           "a payment: the session's screen is its payer's, the refund goes")
     st.show_refund()
     check(r.snap()["notice"] == "A refund due shows only while the station waits for a payment",
@@ -1688,6 +1706,7 @@ def test_refund_screen(tmp: Path) -> None:
     main.station.closed_ids.add("F3456789")
     main.handle_payment(Payment("12" * 32, "op-m", a, Decimal("1"), "XLM", "F3456789", "", "horizon"))
     hidden = main.snapshot()["refund_due"]
+    main.station.on_horizon()  # no heartbeat here: as if Horizon had just answered
     client = TestClient(main.app, base_url="http://127.0.0.1:8000")
     with client.websocket_connect("/ws", headers={"host": "127.0.0.1:8000"}) as ws:
         ws.receive_json()
@@ -1720,9 +1739,10 @@ def test_refund_screen(tmp: Path) -> None:
           "are due, and 'not a pay QR'")
     check('(e.key === "r" || e.key === "R") && !e.ctrlKey' in html and 'send("r")' in html
           and 'id="d-refunds"' in html and 'dot("refunds"' in html
-          and "body.custody .h.refunds { display: none; }" in html,
-          "R on the station screen (never Ctrl+R, which reloads), and a footer item with how many are due (direct "
-          "mode only)")
+          and "body.custody .h.refunds { display: none; }" in html
+          and '"not seen paid now, do not pay one again · " + rd.unseen' in html,
+          "R on the station screen (never Ctrl+R, which reloads), and a footer item with how many are due and, "
+          "while one paid now would not be seen paid, not to pay one again (direct mode only)")
 
 
 def test_robustness(tmp: Path) -> None:

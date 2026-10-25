@@ -1762,15 +1762,22 @@ class Station:
             return "No refund due"
         if self.state != State.AWAITING_PAYMENT:
             return "A refund due shows only while the station waits for a payment"
+        unseen = self._refunds_unseen()
+        if unseen:
+            return f"Refunds paid now are not seen ({unseen}): do not pay one again until this clears"
         oos = self.out_of_service()
         if oos:
             return f"Out of service ({oos}): no refund due shows until it clears"
         return None
 
     def _refund_shown(self) -> bool:
-        """The operator shows the newest refund due now (show_refund())."""
-        return (self.refund_shown_until is not None and self.clock() < self.refund_shown_until
-                and self._refund_refusal() is None)
+        """The operator shows the newest refund due now (show_refund()).
+        Once its minute is over, or it cannot show (out of service, say), it
+        stays hidden until R asks again: never back on screen by itself."""
+        if self.refund_shown_until is not None and (self.clock() >= self.refund_shown_until
+                                                    or self._refund_refusal() is not None):
+            self.refund_shown_until = None
+        return self.refund_shown_until is not None
 
     # -- the clock ------------------------------------------------------------
     def tick(self, reading: Reading) -> None:
@@ -2376,13 +2383,30 @@ class Station:
             stale = max(ESCROW_STALE_SECONDS, 3 * self.cfg.horizon_poll_seconds)
             if self.clock() - self.escrow_read_at > stale:
                 return f"escrow: the contract not read for {int(self.clock() - self.escrow_read_at)} s"
-        if self.cfg.network == "public" and not self.cfg.custody and self.horizon_watched:
-            if self.horizon_read_at is None:
-                return "horizon: not read yet"
-            stale = max(HORIZON_STALE_SECONDS, 3 * self.cfg.horizon_poll_seconds)
-            if self.clock() - self.horizon_read_at > stale:
-                return f"horizon: not read for {int(self.clock() - self.horizon_read_at)} s"
+        if self.cfg.network == "public" and not self.cfg.custody:
+            return self._horizon_stale()
         return None
+
+    def _horizon_stale(self) -> str | None:
+        """Why the host's payments are not being read now, or None: Horizon
+        watched and not read for HORIZON_STALE_SECONDS (or not yet)."""
+        if not self.horizon_watched:
+            return None
+        if self.horizon_read_at is None:
+            return "horizon: not read yet"
+        stale = max(HORIZON_STALE_SECONDS, 3 * self.cfg.horizon_poll_seconds)
+        if self.clock() - self.horizon_read_at > stale:
+            return f"horizon: not read for {int(self.clock() - self.horizon_read_at)} s"
+        return None
+
+    def _refunds_unseen(self) -> str | None:
+        """Direct mode: why a refund the host pays now would not be seen
+        paid, or None: Horizon not being read, on any network, or a log that
+        cannot take its refunded line (on_host_payment()). The card would
+        stay up, as if the payment had failed, and invite a second one."""
+        if self.log.error or self.pending:
+            return self.log.error or f"{len(self.pending)} record(s) waiting to be written"
+        return self._horizon_stale()
 
     def snapshot(self) -> dict:
         now = self.clock()
@@ -2509,11 +2533,12 @@ class Station:
             # which one of them it is.
             "last_receipt": receipt["record"] if receipt else None,
             "last_receipt_turn": [turn, turns] if turns > 1 else None,
-            # Direct mode: how many refunds the host still owes (the footer)
-            # and, only while the operator shows it (R, show_refund()), the
-            # newest: what is left of it, the URI that pays that (main.py
-            # adds its QR) and the seconds it still shows.
-            "refund_due": ({"count": len(self.refunds_due),
+            # Direct mode: how many refunds the host still owes (the footer),
+            # why one paid now would not be seen paid (the footer says not to
+            # pay one again), and, only while the operator shows it (R,
+            # show_refund()), the newest: what is left of it, the URI that
+            # pays that (main.py adds its QR) and the seconds it still shows.
+            "refund_due": ({"count": len(self.refunds_due), "unseen": self._refunds_unseen(),
                             "seconds_left": int(math.ceil(self.refund_shown_until - now)) if refund_shown else None,
                             **({"ref": due["ref"], "payer": due["payer"], "amount": format_amount(due["left"]),
                                 "asset": due["asset"], "asset_issuer": due["asset_issuer"],

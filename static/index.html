@@ -880,7 +880,12 @@
     dot("registry", rg.status === "ok" ? "ok" : rg.status === "unchecked" ? "warn" : rg.status === "mismatch" ? "bad" : "off",
         rg.status + (rg.detail ? " · " + rg.detail : ""));
     // Direct mode: the refunds the host owes; R shows the newest for a minute.
-    if (!custody) dot("refunds", rd ? "warn" : "off", rd ? rd.count + " due · R " + (shown ? "hides it" : "shows it") : "none");
+    // While a refund paid now would not be seen paid (Horizon not read, the
+    // log not writable), none shows: the card would stay up as if the
+    // payment had failed, so the footer says not to pay one again.
+    if (!custody) dot("refunds", !rd ? "off" : rd.unseen ? "bad" : "warn", !rd ? "none"
+        : rd.count + " due · " + (rd.unseen ? "not seen paid now, do not pay one again · " + rd.unseen
+        : "R " + (shown ? "hides it" : "shows it")));
     // Custody: the contract, its events, whether its terms were checked at
     // startup, and this computer's clock when it is far from ledger time
     // (deadlines follow the ledger anyway; the log's times do not).
