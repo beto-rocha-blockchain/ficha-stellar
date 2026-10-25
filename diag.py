@@ -28,11 +28,15 @@ def _cfg():
     try:
         return config.load()
     except config.ConfigError as exc:
-        # Diagnostics should still run with a half-finished .env.
+        # Diagnostics should still run with a half-finished .env. They never
+        # take a payment, so they run on testnet (the public network refuses
+        # the mock settings this fallback needs).
         print(f"(config warning: {exc})")
         import os
         os.environ["MOCK_PAYMENT"] = "true"
         os.environ["MOCK"] = "true"
+        os.environ["STELLAR_NETWORK"] = "testnet"
+        os.environ["HORIZON_URL"] = ""
         return config.load()
 
 
