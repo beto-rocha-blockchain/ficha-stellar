@@ -5,7 +5,9 @@
 //    Nothing else in registry/ is published: a draft (stations.draft.json)
 //    or a stray file there would otherwise go to the public site. The names
 //    are REGISTRY_FILE (scripts/registries.mjs), the ones build:site and
-//    publish:site check, which also refuse a registry without its .sig.
+//    publish:site check, which also refuse a registry not signed by its
+//    network's pinned key. This copy checks no signature: the app verifies
+//    the bundled copy too and never uses one that fails.
 // 2. Builds the PWA/app icons from ../brand:
 //    - brand/ficha-app-icon.svg if it exists, else the mark on the dark background;
 //    - brand/png/*.png copied as-is when present (e.g. icon-192x192.png).

@@ -15,8 +15,8 @@
 // byte: its signature covers the exact bytes, so the target should mark it
 // -text in .gitattributes; the script writes that file when the target has none.
 // Nothing is copied unless dist-site/registry/ holds exactly the signed
-// registries of ../registry (scripts/registries.mjs): an unsigned one, a stray
-// file or a copy that differs stops the publish.
+// registries of ../registry (scripts/registries.mjs): one not signed by its
+// network's pinned key, a stray file or a copy that differs stops the publish.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";

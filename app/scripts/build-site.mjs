@@ -42,7 +42,8 @@ function registries(check) {
   }
 }
 
-// Before building: a registry without its .sig fails here, not on the site.
+// Before building: a registry not signed by its network's pinned key (no
+// .sig, another key, an edit after signing) fails here, not on the site.
 registries(() => registryFiles(registry));
 node("scripts/sync-assets.mjs");
 node("node_modules/vite/bin/vite.js", ["build", "--outDir", "dist-site", "--emptyOutDir"], { VITE_BASE: SITE_BASE });

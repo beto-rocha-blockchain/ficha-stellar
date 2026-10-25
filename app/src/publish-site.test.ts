@@ -3,13 +3,17 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Keypair } from "@stellar/stellar-sdk";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // scripts/publish-site.mjs and build-site.mjs in a throwaway tree: <tmp>/app/scripts,
 // <tmp>/app/dist-site, <tmp>/registry and the site checkout <tmp>/site. dist-site/registry/
 // comes from scripts/sync-assets.mjs, as in npm run build:site; build-site.mjs runs a
 // stand-in for vite (it copies public/, as vite does, and writes the build's own files).
+// <tmp>/docs/station-app-contract.md pins this test's own registry keys.
 const scripts = fileURLToPath(new URL("../scripts/", import.meta.url));
+const testnetRegistry = Keypair.random();
+const publicRegistry = Keypair.random();
 let root: string;
 let site: string;
 
@@ -45,6 +49,12 @@ const bytes = (path: string) => readFileSync(path);
 
 // CRLF and a non-ASCII byte: a copy that rewrote either would no longer match its signature.
 const PUBLIC = Buffer.from('{\r\n  "network": "public",\r\n  "name": "Lisboa é"\r\n}\r\n', "utf8");
+// PUBLIC edited after it was signed.
+const EDITED = Buffer.from(PUBLIC.toString("utf8").replace("Lisboa", "Porto"), "utf8");
+
+/** The .sig of `data` by `kp`, as tools/registry.py sign writes it. */
+const sigOf = (data: Uint8Array | string, kp = publicRegistry) =>
+  JSON.stringify({ format: "ficha-registry-sig/1", key: kp.publicKey(), sig: Buffer.from(kp.sign(Buffer.from(data))).toString("base64") });
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "ficha-publish-"));
@@ -65,8 +75,12 @@ beforeAll(() => {
       'writeFileSync("dist-site/manifest.webmanifest", JSON.stringify({ scope: "/", start_url: "/" }));',
     ].join("\n"),
   );
+  write(
+    join(root, "docs", "station-app-contract.md"),
+    `- Registry key (testnet): ${testnetRegistry.publicKey()}\n- Registry key (public): ${publicRegistry.publicKey()}\n`,
+  );
   write(reg("stations.json"), "{}");
-  write(reg("stations.json.sig"), "sig");
+  write(reg("stations.json.sig"), sigOf("{}", testnetRegistry));
   mkdirSync(join(site, ".git"), { recursive: true });
   write(join(site, "README.md"), "not ours");
 });
@@ -101,7 +115,7 @@ describe("publish-site", () => {
 
   it("publishes the public registry next to the testnet one, byte for byte, and refuses a copy that differs", () => {
     write(reg("stations.public.json"), PUBLIC);
-    write(reg("stations.public.json.sig"), "public sig");
+    write(reg("stations.public.json.sig"), sigOf(PUBLIC));
     try {
       publish("P", []);
       for (const f of ["stations.json", "stations.json.sig", "stations.public.json", "stations.public.json.sig"]) {
@@ -145,6 +159,43 @@ describe("publish-site", () => {
     }
   });
 
+  it("never publishes a registry the app would refuse: another key, an edit after signing, a .sig that is not one", () => {
+    const before = readFileSync(join(site, "index.html"), "utf8");
+    const other = Keypair.random();
+    const pinned = `not by the public registry key pinned in docs/station-app-contract.md (${publicRegistry.publicKey()})`;
+    try {
+      for (const [what, data, sig, error] of [
+        ["another key", PUBLIC, sigOf(PUBLIC, other), `../registry/stations.public.json is signed by ${other.publicKey()}, ${pinned}`],
+        ["the testnet key", PUBLIC, sigOf(PUBLIC, testnetRegistry), `is signed by ${testnetRegistry.publicKey()}, ${pinned}`],
+        // sync-assets copies the edited file, so only the signature tells.
+        ["edited after signing", EDITED, sigOf(PUBLIC), "../registry/stations.public.json.sig does not match these bytes (edited after signing?)"],
+        ["not a signature", PUBLIC, "public sig", "../registry/stations.public.json.sig is not a ficha-registry-sig/1 signature file"],
+      ] as const) {
+        write(reg("stations.public.json"), data);
+        write(reg("stations.public.json.sig"), sig);
+        const r = run("V", []);
+        expect(r.status, what).not.toBe(0);
+        expect(r.stderr, what).toContain(error);
+        expect(r.stderr, what).toContain("Nothing was copied");
+        expect(has("registry/stations.public.json"), what).toBe(false);
+        expect(readFileSync(join(site, "index.html"), "utf8"), what).toBe(before);
+      }
+    } finally {
+      rmSync(reg("stations.public.json"), { force: true });
+      rmSync(reg("stations.public.json.sig"), { force: true });
+    }
+    // The testnet registry too.
+    write(reg("stations.json"), "{ }");
+    try {
+      const r = run("V", []);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("../registry/stations.json.sig does not match these bytes (edited after signing?)");
+      expect(readFileSync(join(site, "index.html"), "utf8")).toBe(before);
+    } finally {
+      write(reg("stations.json"), "{}");
+    }
+  });
+
   it("publishes no stray file: a draft in registry/ stays in the repo, and a build that carries one is refused", () => {
     write(reg("stations.draft.json"), "{}");
     write(reg("notes.txt"), "draft");
@@ -173,7 +224,7 @@ describe("build-site", () => {
 
   it("carries every signed registry, the public one too, byte for byte, and no draft", () => {
     write(reg("stations.public.json"), PUBLIC);
-    write(reg("stations.public.json.sig"), "public sig");
+    write(reg("stations.public.json.sig"), sigOf(PUBLIC));
     write(reg("stations.draft.json"), "{}");
     try {
       const r = build();
@@ -201,6 +252,31 @@ describe("build-site", () => {
       expect(existsSync(dist())).toBe(false);
     } finally {
       rmSync(reg("stations.public.json"), { force: true });
+    }
+  });
+
+  it("fails, before building anything, on a registry the app would refuse: another key, an edit after signing, no key pinned", () => {
+    const contract = join(root, "docs", "station-app-contract.md");
+    const pins = readFileSync(contract, "utf8");
+    const other = Keypair.random();
+    try {
+      for (const [what, data, sig, contractText, error] of [
+        ["another key", PUBLIC, sigOf(PUBLIC, other), pins, `[build-site] ../registry/stations.public.json is signed by ${other.publicKey()}, not by the public registry key pinned`],
+        ["edited after signing", EDITED, sigOf(PUBLIC), pins, "[build-site] ../registry/stations.public.json.sig does not match these bytes (edited after signing?)"],
+        ["no public key pinned", PUBLIC, sigOf(PUBLIC), pins.replace(/^- Registry key \(public\).*$/m, ""), '[build-site] no public registry key is pinned in docs/station-app-contract.md ("Registry key (public): G...")'],
+      ] as const) {
+        write(reg("stations.public.json"), data);
+        write(reg("stations.public.json.sig"), sig);
+        write(contract, contractText);
+        const r = build();
+        expect(r.status, what).not.toBe(0);
+        expect(r.stderr, what).toContain(error);
+        expect(existsSync(dist()), what).toBe(false);
+      }
+    } finally {
+      write(contract, pins);
+      rmSync(reg("stations.public.json"), { force: true });
+      rmSync(reg("stations.public.json.sig"), { force: true });
     }
   });
 });
