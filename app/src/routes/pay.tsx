@@ -39,7 +39,7 @@ import { estimatedEnd } from "@/pay/format";
 import { fetchMyPayments, fetchSessionPayments, othersFor, paymentsFor, type HostPayment, type MyPayment } from "@/pay/history";
 import { loadLastPayment, saveLastPayment, type LastPayment } from "@/pay/last-payment";
 import { getReceipt } from "@/pay/receipts-store";
-import { Sep7Error, parseFichaMemo, parseSep7Pay, type FichaMemo, type PayRequest } from "@/pay/sep7";
+import { Sep7Error, parseFichaMemo, parseSep7Pay, requestPassphrase, type FichaMemo, type PayRequest } from "@/pay/sep7";
 import { maxFichas, useRegistry } from "@/registry";
 import {
   SubmitError,
@@ -113,7 +113,8 @@ function PayUri({ uri }: { uri: string }) {
   let blocked: string | null = null;
   if ("error" in parsed) blocked = t("pay.badQr", { code: String(parsed.error) });
   else if (!parsed.memo) blocked = t("pay.notFicha");
-  else if (parsed.req.networkPassphrase && parsed.req.networkPassphrase !== net.passphrase) blocked = t("pay.wrongNetwork");
+  // No network_passphrase is a public network request (SEP-0007), not "any network".
+  else if (requestPassphrase(parsed.req) !== net.passphrase) blocked = t("pay.wrongNetwork");
 
   return (
     <div className="space-y-4">
@@ -207,6 +208,7 @@ function PayForm({ req, memo }: { req: PayRequest; memo: FichaMemo }) {
   const station = check.state === "ok" || check.state === "legacy" ? check.station : null;
 
   let blockedText: string | null = null;
+  if (check.state === "wrong_network") blockedText = t("pay.wrongNetwork");
   if (check.state === "mismatch") blockedText = t("pay.mismatch", { id: check.stationId });
   if (check.state === "asset_mismatch") blockedText = t("pay.assetMismatch", { id: check.station.id, code: req.asset.code, expected: check.station.asset.code });
   if (check.state === "price_mismatch") {

@@ -2,7 +2,7 @@
  * SEP-0007 `web+stellar:pay` parsing and Ficha memo parsing
  * (docs/station-app-contract.md §1). The app pays only these QRs.
  */
-import { StrKey } from "@stellar/stellar-sdk";
+import { Networks, StrKey } from "@stellar/stellar-sdk";
 import type { AssetRef } from "@/config";
 import { isValidAmount, toStroops } from "@/stellar/amount";
 
@@ -31,6 +31,14 @@ export interface PayRequest {
   msg: string | null;
   networkPassphrase: string | null;
   uri: string;
+}
+
+/**
+ * The network a request is for. SEP-0007: without network_passphrase it is
+ * the public network, and the station leaves it out there (stellar.py sep7_uri).
+ */
+export function requestPassphrase(req: Pick<PayRequest, "networkPassphrase">): string {
+  return req.networkPassphrase ?? Networks.PUBLIC;
 }
 
 export class Sep7Error extends Error {

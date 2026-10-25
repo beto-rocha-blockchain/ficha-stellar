@@ -10,10 +10,12 @@ import { isCustody, maxFichas, stationById, stationsByHostKey, type Registry, ty
 import { compareAmounts, toStroops } from "@/stellar/amount";
 import { sameAsset } from "@/stellar/horizon";
 import type { MyPayment } from "./history";
-import type { FichaMemo, PayRequest } from "./sep7";
+import { requestPassphrase, type FichaMemo, type PayRequest } from "./sep7";
 
 export type Check =
   | { state: "ok"; station: Station }
+  /** The QR is for another network than the app's (no network_passphrase = the public network). */
+  | { state: "wrong_network" }
   | { state: "mismatch"; stationId: string }
   | { state: "asset_mismatch"; station: Station }
   | { state: "price_mismatch"; station: Station }
@@ -37,7 +39,8 @@ function priceDiffers(req: PayRequest, st: Station): boolean {
   return req.amount !== null && compareAmounts(req.amount, st.ficha_price) !== 0;
 }
 
-export function checkAgainstRegistry(req: PayRequest, memo: FichaMemo, reg: Registry | null, net: Pick<NetworkConfig, "id">): Check {
+export function checkAgainstRegistry(req: PayRequest, memo: FichaMemo, reg: Registry | null, net: Pick<NetworkConfig, "id" | "passphrase">): Check {
+  if (requestPassphrase(req) !== net.passphrase) return { state: "wrong_network" };
   if (memo.kind === "legacy") {
     // On the testnet a legacy QR may still be paid at its own amount after
     // "I understand the risk"; with real money, never on the QR's word alone.

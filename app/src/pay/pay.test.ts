@@ -21,7 +21,7 @@ import {
   type MyPayment,
 } from "./history";
 import { ReceiptError, isReceiptUri, parseReceipt, unusedSeconds } from "./receipt";
-import { Sep7Error, parseFichaMemo, parseSep7Pay } from "./sep7";
+import { Sep7Error, parseFichaMemo, parseSep7Pay, requestPassphrase } from "./sep7";
 
 const HOST = "GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6";
 const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
@@ -202,6 +202,25 @@ describe("QR against the signed registry", () => {
       const two: Registry = { ...reg, stations: [station, { ...station, id: "K7M2QX" }] };
       expect(at(legacy, two, "testnet")).toEqual({ state: "legacy", station: null });
     });
+  });
+
+  it("reads a QR without network_passphrase as a Mainnet request (SEP-0007), never as 'any network'", () => {
+    const mainnet = STATION_URI.replace(/&network_passphrase=[^&]*/, "");
+    const pub: Registry = { ...reg, network: "public" };
+    const at = (uri: string, r: Registry | null, net: keyof typeof NETWORKS) => {
+      const req = parseSep7Pay(uri);
+      return checkAgainstRegistry(req, parseFichaMemo(req.memo)!, r, NETWORKS[net]).state;
+    };
+    expect(requestPassphrase(parseSep7Pay(mainnet))).toBe(NETWORKS.public.passphrase);
+    // A Mainnet QR in a testnet app, and a testnet QR in a Mainnet app.
+    expect(at(mainnet, reg, "testnet")).toBe("wrong_network");
+    expect(at(mainnet.replace("ERZGCG.F3H9TXAB", "F3H9TXAB"), reg, "testnet")).toBe("wrong_network");
+    expect(at(STATION_URI, pub, "public")).toBe("wrong_network");
+    expect(at(STATION_URI, null, "public")).toBe("wrong_network");
+    // The Mainnet QR in a Mainnet app goes on to the registry.
+    expect(at(mainnet, pub, "public")).toBe("ok");
+    expect(at(mainnet, null, "public")).toBe("no_registry");
+    expect(at(mainnet.replace(`destination=${HOST}`, `destination=${USDC_ISSUER}`), pub, "public")).toBe("mismatch");
   });
 });
 
