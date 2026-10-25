@@ -993,6 +993,14 @@ def test_public_rechecks(tmp: Path) -> None:
     def offline(url: str):
         raise registry_check.Unavailable("ConnectError")
 
+    def on_disk(**change) -> Path:
+        """The local copy, signed: one nobody refreshed when the site's changed."""
+        path = tmp / "stations.public.json"
+        raw, sig = site(**change)(path.name)
+        path.write_bytes(raw)
+        registry_format.sig_path(path).write_bytes(sig)
+        return path
+
     r = Rig(tmp)
     pub = on_public(r.cfg, registry_key=kp.public_key, registry_file=tmp / "missing.json",
                     registry_url=config.REGISTRY_SITE + config.REGISTRY_FILES["public"])
@@ -1013,6 +1021,17 @@ def test_public_rechecks(tmp: Path) -> None:
           and fetched == [],
           "registry_check.recheck: a public direct station is checked again (ficha_minutes 5 -> 10 re-signed: a "
           "mismatch, short); a direct station on testnet is not re-read")
+    stale = on_disk(ficha_minutes=10)
+    try:
+        registry_check.recheck(replace(testnet, payment_mode="custody", registry_file=stale), offline)
+        custody = ""
+    except registry_check.Mismatch as exc:
+        custody = str(exc)
+    check(registry_check.recheck(replace(pub, registry_file=stale), offline) == {"status": "unchecked",
+                                                                                "detail": "no copy found"}
+          and f"({stale})" in custody,
+          "public, direct, the site unreachable and a stale local copy (ficha_minutes 10): nothing new, the local "
+          "copy is not read (the app reads the site's); custody still falls back to it")
 
     main = sys.modules.get("main") or import_main(tmp)
     st = Station(pub, MockRelay(), SessionLog(tmp / "pub.jsonl"), clock=r.clock, wallclock=r.clock.iso,
@@ -1028,19 +1047,25 @@ def test_public_rechecks(tmp: Path) -> None:
 
     logging.disable(logging.WARNING)
     try:
-        main.cfg, main.station = pub, st
+        main.cfg, main.station = replace(pub, registry_file=stale), st
         escrow.recheck = lambda cfg, ledger: escrow_reads.append(cfg) or []
         s = run(site())
         check(s["out_of_service"] is None and s["registry"] == {"status": "ok", "detail": "site"},
               "public, direct: a re-read that matches leaves the station in service")
+        s = run(offline)
+        check(s["out_of_service"] is None and s["registry"] == {"status": "ok", "detail": "site"},
+              "public, direct: the site unreachable once, a stale local copy (ficha_minutes 10) on disk: still in "
+              "service")
         s = run(site(ficha_minutes=10))
         check(s["out_of_service"] == "registry: FICHA_MINUTES=5 here, ficha_minutes 10 in the registry"
               and s["registry"] == {"status": "mismatch", "detail": "FICHA_MINUTES=5 here, ficha_minutes 10 in the "
                                                                    "registry"},
               "public, direct: the registry re-signed with ficha_minutes 10 at the same price: out of service (no pay "
               "QR), the footer says why")
+        on_disk()
         s = run(offline)
-        check(s["out_of_service"] is not None, "a re-read that cannot reach the registry changes nothing")
+        check(s["out_of_service"] is not None,
+              "a re-read that cannot reach the site changes nothing, not even with a local copy that matches")
         s = run(site())
         check(s["out_of_service"] is None and escrow_reads == [],
               "a re-read that matches again: back in service; a direct station's contract is never read")

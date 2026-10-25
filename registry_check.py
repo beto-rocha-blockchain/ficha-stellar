@@ -21,8 +21,9 @@ pays as the newest registry says, so a registry published with another
 the station made inactive would have the app pay where this station never
 looks, or promise what it does not sell. On any difference it goes out of
 service, its pay QR hidden, until it matches again: in practice, until it is
-restarted with the new values. A direct station on testnet is checked at
-startup only.
+restarted with the new values. A direct station on public re-reads only the
+site's copy, the one the app reads. A direct station on testnet is checked
+at startup only.
 """
 
 from __future__ import annotations
@@ -177,14 +178,16 @@ def _check_copy(cfg: Config, source: str, name: str, data: bytes, sig: dict) -> 
     return reg
 
 
-def check(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url, quiet: bool = False) -> dict:
+def check(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url, quiet: bool = False,
+          local: bool = True) -> dict:
     """Check this station against the signed registry: at startup, and, in
     custody or on the public network, again while it runs (recheck()).
 
     Returns the footer's registry health, {"status": ok | unchecked | off,
     "detail": ...}. Raises Mismatch (a ConfigError) when a copy is badly
     signed or this station differs from its entry. quiet: no log lines (a
-    re-read every minute says only what changes, main.py)."""
+    re-read every minute says only what changes, main.py). local=False: the
+    site's copy only, never the local one."""
     if not cfg.station_id:
         return {"status": "off", "detail": "no STATION_ID"}
     if not cfg.registry_check:
@@ -199,10 +202,9 @@ def check(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url, 
         return {"status": "unchecked", "detail": "no REGISTRY_KEY"}
 
     url, path = cfg.registry_url, cfg.registry_file
-    copies = (
-        ("site", url, urlsplit(url).path.rsplit("/", 1)[-1], lambda: fetch(url)),
-        ("local copy", _shown(path), path.name, lambda: read_file(path)),
-    )
+    copies = [("site", url, urlsplit(url).path.rsplit("/", 1)[-1], lambda: fetch(url))]
+    if local:
+        copies.append(("local copy", _shown(path), path.name, lambda: read_file(path)))
     missed = []
     for label, source, name, get in copies:
         try:
@@ -255,12 +257,15 @@ def startup(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url
 
 def recheck(cfg: Config, fetch: Callable[[str], tuple[bytes, bytes]] = fetch_url) -> dict:
     """A custody station, or any station on the public network, while it
-    runs: the startup check again, in the same order (the site's copy, then
-    the local one), without its log lines. Blocking: main.py runs it in a
-    thread. Returns the health as check() does ("unchecked": no copy could be
-    read now, nothing new); raises Mismatch when the station would no longer
+    runs: the startup check again, without its log lines. Custody: in the
+    same order (the site's copy, then the local one). Direct on public: the
+    site's copy only. The local copy is not what the app reads, so a stale
+    one, read while the site is down, would take a matching station out of
+    service or clear a real mismatch. Blocking: main.py runs it in a thread.
+    Returns the health as check() does ("unchecked": no copy could be read
+    now, nothing new); raises Mismatch when the station would no longer
     start. Direct mode on testnet: not re-read (it keeps working exactly as
     before)."""
     if not cfg.rechecks_registry:
         return {"status": "off", "detail": "direct mode"}
-    return check(cfg, fetch, quiet=True)
+    return check(cfg, fetch, quiet=True, local=cfg.custody)

@@ -158,9 +158,10 @@ signature in `registry/stations.json.sig`.
   does not verify puts it out of service, its pay QR hidden and the
   registry item red with the difference, until a read matches again: in
   practice until it is restarted with the new values. With no copy readable
-  nothing changes. The app pays the contract the newest registry names, so
-  without this a station still watching the old contract would take
-  deposits it never sees, and a public station re-signed with other terms
+  nothing changes; a direct station on public reads only the site's copy (the
+  one the app reads), so a stale local copy changes nothing either. The app
+  pays the contract the newest registry names, so without this a station
+  still watching the old contract would take deposits it never sees, and a public station re-signed with other terms
   (`ficha_minutes` 5 -> 10 at the same price) would sell the old ones. To
   change a running station's entry: stop the station, publish the registry,
   update its `.env`, start it. Direct stations on testnet are not re-read.

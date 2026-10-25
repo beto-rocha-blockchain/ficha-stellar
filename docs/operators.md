@@ -465,7 +465,8 @@ station on the public network does not start (section 4). The footer
 shows `registry ok · site` or `ok · local copy` when the check passed, and
 `off` without `STATION_ID` or with `REGISTRY_CHECK=false`. A custody station,
 and any station on public, also reads it again every minute while it runs
-(a direct one on testnet does not), and goes out of service
+(a direct one on testnet does not; a direct one on public reads only the
+site's copy, the one the app reads), and goes out of service
 (`registry mismatch` in red, no pay QR) when its entry no longer matches
 (section 7).
 
