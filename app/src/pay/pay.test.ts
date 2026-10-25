@@ -170,29 +170,26 @@ describe("QR against the signed registry", () => {
       return checkAgainstRegistry(req, parseFichaMemo(req.memo)!, r, NETWORKS[net]);
     };
 
-    it("on Mainnet with no registry is blocked (none is published for the public network yet)", () => {
-      expect(at(mainnet, null, "public")).toEqual({ state: "no_registry", stationId: null });
-      expect(at(mainnet.replace("amount=1&", ""), null, "public")).toEqual({ state: "no_registry", stationId: null });
-    });
-
-    it("on Mainnet to an address the registry does not list as exactly one station is blocked", () => {
-      expect(at(mainnet.replace(`destination=${HOST}`, `destination=${USDC_ISSUER}`), pub, "public")).toEqual({ state: "unlisted" });
+    it("on Mainnet is blocked, with or without a registry, wherever it points", () => {
+      const blocked = { state: "no_station_code" };
+      expect(at(mainnet, null, "public")).toEqual(blocked);
+      expect(at(mainnet.replace(`destination=${HOST}`, `destination=${USDC_ISSUER}`), pub, "public")).toEqual(blocked);
       // Listed, but in another asset, or only as a custody station.
-      expect(at(mainnet.replace("&memo=", `&asset_code=USDC&asset_issuer=${USDC_ISSUER}&memo=`), pub, "public")).toEqual({ state: "unlisted" });
+      expect(at(mainnet.replace("&memo=", `&asset_code=USDC&asset_issuer=${USDC_ISSUER}&memo=`), pub, "public")).toEqual(blocked);
       const custody: Registry = { ...pub, stations: [{ ...pub.stations[0], mode: "custody", escrow: "C", unit_seconds: 30, grace_seconds: 1680 }] };
-      expect(at(mainnet, custody, "public")).toEqual({ state: "unlisted" });
-      // Two active stations at one address: which one the QR is for cannot be told.
-      const two: Registry = { ...pub, stations: [pub.stations[0], { ...pub.stations[0], id: "K7M2QX" }] };
-      expect(at(mainnet, two, "public")).toEqual({ state: "unlisted" });
+      expect(at(mainnet, custody, "public")).toEqual(blocked);
       // A disabled station stays disabled.
       expect(at(mainnet, { ...pub, stations: [{ ...pub.stations[0], active: false }] }, "public")).toEqual({ state: "inactive", stationId: "ERZGCG" });
     });
 
-    it("on Mainnet to the one listed station is paid at the registry's price, not the QR's", () => {
-      const ok = at(mainnet.replace("amount=1&", ""), pub, "public");
-      expect(ok).toMatchObject({ state: "legacy", station: { id: "ERZGCG", ficha_price: "0.5" } });
-      expect(at(mainnet.replace("amount=1&", "amount=0.5&"), pub, "public")).toMatchObject({ state: "legacy", station: { id: "ERZGCG" } });
-      expect(at(mainnet, pub, "public")).toMatchObject({ state: "price_mismatch", station: { id: "ERZGCG" } });
+    it("on Mainnet to the one listed station is blocked too: that station credits only a memo with its ID", () => {
+      // A public station never runs without STATION_ID (config.py
+      // validate_public), and session.py logs a bare session memo as an
+      // orphan: the money would reach the host and charge no phone.
+      const blocked = { state: "no_station_code" };
+      expect(at(mainnet.replace("amount=1&", ""), pub, "public")).toEqual(blocked);
+      expect(at(mainnet.replace("amount=1&", "amount=0.5&"), pub, "public")).toEqual(blocked);
+      expect(at(mainnet, pub, "public")).toEqual(blocked);
     });
 
     it("on the testnet is paid as before: the QR's own amount when no station is listed", () => {

@@ -219,7 +219,7 @@ function PayForm({ req, memo }: { req: PayRequest; memo: FichaMemo }) {
   if (check.state === "inactive") blockedText = t("pay.inactive", { id: check.stationId });
   if (check.state === "custody_only") blockedText = t("pay.custodyOnly", { id: check.stationId });
   if (check.state === "no_registry") blockedText = t("pay.noRegistry");
-  if (check.state === "unlisted") blockedText = t("pay.unlisted");
+  if (check.state === "no_station_code") blockedText = t("pay.noStationCode");
   // Legacy without a registry match (testnet only): only the QR's own amount, one ficha.
   if (check.state === "legacy" && !station && !req.amount) blockedText = t("pay.notFicha");
   if (!blockedText && ended) blockedText = t("pay.sessionEnded");
