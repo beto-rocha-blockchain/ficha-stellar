@@ -1,8 +1,9 @@
 // Runs before `npm run dev` and `npm run build` (predev/prebuild).
-// 1. Copies the signed station registry ../registry/stations*.json and their
-//    .sig -> public/registry/ byte for byte (the signature covers the exact
-//    bytes). Nothing else in registry/ is published: a draft or a stray file
-//    there would otherwise go to the public site.
+// 1. Copies the two signed station registries the app reads,
+//    ../registry/stations.json and stations.public.json with their .sig ->
+//    public/registry/ byte for byte (the signature covers the exact bytes).
+//    Nothing else in registry/ is published: a draft (stations.draft.json)
+//    or a stray file there would otherwise go to the public site.
 // 2. Builds the PWA/app icons from ../brand:
 //    - brand/ficha-app-icon.svg if it exists, else the mark on the dark background;
 //    - brand/png/*.png copied as-is when present (e.g. icon-192x192.png).
@@ -22,7 +23,7 @@ mkdirSync(regDst, { recursive: true });
 let n = 0;
 if (existsSync(regSrc)) {
   for (const f of readdirSync(regSrc)) {
-    if (/^stations(\.[a-z]+)?\.json(\.sig)?$/.test(f)) {
+    if (/^stations(\.public)?\.json(\.sig)?$/.test(f)) {
       copyFileSync(join(regSrc, f), join(regDst, f));
       n++;
     }
