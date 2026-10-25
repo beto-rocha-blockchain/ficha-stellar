@@ -271,6 +271,33 @@
   #lastqr { width: min(13vw, 24vh); }
   .lastreceipt .qrnote { font-size: clamp(0.8rem, 1.1 * var(--u), 1.35rem); }
   .lastreceipt .qrnote b { display: block; color: var(--success); font-size: 1.15em; margin-bottom: 0.2em; }
+  /* Direct mode: a refund the host owes (the station holds no key), for the
+     operator, on the waiting screen in the same place, away from the pay
+     QR: the newest, as a SEP-0007 QR the host's mobile wallet scans, and a
+     link to the Ficha site's page that the Freighter extension signs as the
+     host. Labelled as the host's, dashed: someone who came to pay must not
+     scan it. Its payer is the one in the station's log, never an address
+     from a wallet's history. */
+  .readings > .refundcard { grid-area: tiles; justify-content: center; }
+  .refundcard { display: none; border-style: dashed; border-color: rgb(var(--warning-rgb) / .55); }
+  body.has-refund .refundcard { display: flex; }
+  body.has-refund .row.live { display: none; }
+  #refundqr { width: min(13vw, 24vh); }
+  .refundhead { display: flex; justify-content: space-between; align-items: baseline; gap: 0.6em; width: 0; min-width: 100%;
+                font-family: var(--font-mono); font-weight: 500; text-transform: uppercase; letter-spacing: 0.12em;
+                font-size: clamp(0.75rem, 0.95 * var(--u), 1.15rem); color: var(--warning); white-space: nowrap; }
+  .refundhead span:last-child { color: var(--muted-foreground); letter-spacing: 0.06em; }
+  .refundamt { font-size: clamp(1.4rem, 2.4 * var(--u), 3rem); font-weight: 600; line-height: 1; white-space: nowrap; }
+  .refundamt small { font-family: var(--font-mono); font-size: 0.45em; font-weight: 500; color: var(--muted-foreground); letter-spacing: 0; }
+  .refundcard .qrnote { font-size: clamp(0.8rem, 1.05 * var(--u), 1.3rem); }
+  .refundcard .qrnote b { font-family: var(--font-mono); font-weight: 500; color: var(--foreground); }
+  /* The app's primary button; only with APP_URL (the site's /refund page). */
+  .refundbtn { display: none; align-items: center; justify-content: center; text-align: center; max-width: 100%;
+               font-size: clamp(0.85rem, 1.05 * var(--u), 1.35rem); font-weight: 600; line-height: 1.2; text-decoration: none;
+               padding: 0.55em 0.9em; border-radius: var(--radius); background: var(--primary); color: var(--background); }
+  .refundbtn:hover { background: rgb(var(--primary-rgb) / .85); }
+  .refundbtn:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+  body.refund-link .refundbtn { display: inline-flex; }
 
   /* finished summary */
   .summary { display: none; font-size: clamp(1.1rem, 2 * var(--u), 2.6rem); line-height: 1.5; background: var(--card);
@@ -437,6 +464,13 @@
       <div class="qrbox"><img id="lastqr" alt="Last session's receipt QR code"></div>
       <div class="qrnote" id="lastnote"></div>
     </figure>
+    <figure class="qrcard refundcard" role="note">
+      <div class="refundhead"><span>refund due</span><span id="refundcount"></span></div>
+      <div class="qrbox"><img id="refundqr" alt="Refund QR code for the host's wallet"></div>
+      <div class="refundamt num"><span id="refundamount">0</span><small id="refundasset"></small></div>
+      <div class="qrnote" id="refundnote"></div>
+      <a class="refundbtn" id="refundlink" target="_blank" rel="noopener noreferrer">Refund with Freighter</a>
+    </figure>
 
     <div class="summary" id="summary">
       <div class="big">Done. Thank you.</div>
@@ -498,6 +532,8 @@
   var lastWifi = null;
   var lastReceipt = null;
   var lastLastReceipt = null;
+  var lastRefund = null;
+  var lastRefundLink = null;
 
   var STATE_TEXT = {
     AWAITING_PAYMENT: "waiting for payment",
@@ -737,6 +773,28 @@
       $("lastnote").appendChild(document.createTextNode(
         "Not a pay QR: open it with Scan QR in the Ficha app. Only the wallet that paid " + lr.session_id
         + " can claim it" + (lr.deadline ? ", " + claimLeft(lr.deadline, d) : "") + "."));
+    }
+    // Direct mode: the newest refund the host owes, while waiting only: the
+    // screen of a session being served (charging, finished) is its payer's.
+    var rd = !custody && (st === "AWAITING_PAYMENT" || st === "COURTESY") ? d.refund_due : null;
+    if (rd) {
+      body.classList.add("has-refund");
+      if (rd.qr !== lastRefund) { $("refundqr").src = rd.qr; lastRefund = rd.qr; }
+      $("refundcount").textContent = rd.count > 1 ? "newest of " + rd.count : "";
+      $("refundamount").textContent = amount(rd.amount);
+      $("refundasset").textContent = " " + rd.asset;
+      var rn = $("refundnote"), to = document.createElement("b");
+      rn.innerHTML = "";
+      to.textContent = rd.payer_short;
+      rn.appendChild(document.createTextNode("to "));
+      rn.appendChild(to);
+      rn.appendChild(document.createTextNode(" · " + rd.ref));
+      rn.appendChild(document.createElement("br"));
+      rn.appendChild(document.createTextNode("Not a pay QR: the host's wallet pays it back to the payer in the log."));
+      if (rd.link) {
+        body.classList.add("refund-link");
+        if (rd.link !== lastRefundLink) { $("refundlink").href = rd.link; lastRefundLink = rd.link; }
+      }
     }
     // Custody: no memo, no remainder. The app pays exact fichas, and the
     // receipt returns the time not charged here.

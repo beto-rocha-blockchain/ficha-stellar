@@ -119,6 +119,9 @@ def snapshot() -> dict:
         "receipt": qr.receipt_qr(cfg, snap),
         # Custody: the last session's receipt, smaller, while waiting.
         "last_receipt": qr.last_receipt_qr(cfg, snap["last_receipt"]),
+        # Direct mode: the newest refund the host owes, its QR and the Ficha
+        # site's page that signs it with Freighter.
+        "refund_due": qr.refund_qr(cfg, snap["refund_due"]),
         "station_id": cfg.station_id,
         "station_name": cfg.station_name,
         "network": cfg.network,

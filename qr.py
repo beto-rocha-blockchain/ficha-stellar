@@ -1,5 +1,6 @@
 """QR codes for the station screen: the payment QR (SEP-0007, or the custody
-pay link), the WiFi "Get online" QR and the receipt QR. All are generated
+pay link), the WiFi "Get online" QR, the receipt QR and, direct mode, the
+refund QR the host's wallet pays (SEP-0007 too). All are generated
 here and sent to the page as data URIs, never fetched from anywhere: the
 screen has to work offline.
 """
@@ -138,6 +139,27 @@ def last_receipt_qr(cfg: Config, record: dict | None) -> dict | None:
     return {"uri": uri, "qr": _last_receipt_cache[uri], "session_id": record["id"],
             "to_payer": format_amount(to_amount(custody["to_payer"])), "asset": record["asset"],
             "deadline": custody.get("deadline"), "full": record.get("end_reason") == "not_served"}
+
+
+_refund_cache: dict[str, str] = {}
+
+
+def refund_qr(cfg: Config, due: dict | None) -> dict | None:
+    """Direct mode: the newest refund the host still owes (Station.snapshot),
+    for the operator's card on the waiting screen: its SEP-0007 URI as a QR,
+    which the host's mobile wallet scans, and, with APP_URL, the Ficha site's
+    <APP_URL>/refund?uri=<the URI> (as encodeURIComponent writes it), where
+    the Freighter extension signs it as the host. The payer as the card
+    shows it: its first and last 6 characters."""
+    if not due:
+        return None
+    uri = due["uri"]
+    if uri not in _refund_cache:
+        _refund_cache.clear()  # only the newest is shown
+        _refund_cache[uri] = data_uri(uri)
+    payer = due["payer"]
+    return dict(due, qr=_refund_cache[uri], payer_short=f"{payer[:6]}…{payer[-6:]}",
+                link=f"{cfg.app_url}/refund?uri={quote(uri, safe='')}" if cfg.app_url else None)
 
 
 def wifi_escape(text: str) -> str:

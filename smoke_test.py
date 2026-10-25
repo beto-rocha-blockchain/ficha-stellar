@@ -5,7 +5,10 @@ verdicts, cut confirmation, both topologies, restart after a crash, the
 offered network QR, station IDs and memos, the signed registry and the
 station's startup check against it, the public network's refusals (only a
 real station, checked against the registry, starts there), a Horizon on
-another network, the receipt QR, change and refund hints, payments in another asset, the robustness fixes
+another network, the receipt QR, change and refund hints, the refunds the
+host owes in direct mode (per payer, from the log, on screen as a SEP-0007
+QR and a Freighter button, paid off by the host's payment with their memo),
+payments in another asset, the robustness fixes
 (cursor, log, relay out of service, held readings, transitions, notices,
 config checks), main.py's screens socket (a client that stops reading,
 other origins) and /debug/pay, and custody mode: the hash chain against the
@@ -55,7 +58,7 @@ import escrow
 import registry_check
 import registry_format
 from meter import MockMeter
-from qr import last_receipt_qr, pay_qr, receipt_payload, receipt_qr, wifi_payload, wifi_qr
+from qr import last_receipt_qr, pay_qr, receipt_payload, receipt_qr, refund_qr, wifi_payload, wifi_qr
 from relay import MockRelay
 from session import SessionLog, State, Station, mmss
 from stellar import (
@@ -1586,6 +1589,66 @@ def test_refunded(tmp: Path) -> None:
                                  destination=a))
     check(ref == "txabababababab" and all(e["ref"] != ref for e in main.station.refunds_due),
           "main.py: what the host sends reaches the station (no STATION_ID: the orphan's REF is tx<12 hex>)")
+
+
+def test_refund_screen(tmp: Path) -> None:
+    print("direct mode: the refund due on the station screen, a QR and a Freighter button")
+    site = "https://ficha-stellar.vercel.app"
+    a, b = account(1), account(2)
+    r = Rig(tmp, station_id="K7M2QX", app_url=site, cursor_dir=tmp)
+    st = r.st
+    check(r.snap()["refund_due"] is None and refund_qr(r.cfg, None) is None, "nothing due: no refund on screen")
+    paid_by(r, a, "1.5", memo=None)
+    first = f"K7M2QX.tx{r.n:08x}"
+    paid_by(r, b, "2", memo=None)
+    newest = f"K7M2QX.tx{r.n:08x}"
+    due = r.snap()["refund_due"]
+    check(due == {"ref": newest, "payer": b, "amount": "2", "asset": "XLM", "asset_issuer": None,
+                  "uri": refund_uri(r.cfg, b, Decimal(2), newest), "count": 2},
+          "the newest refund due, its URI, and how many are due")
+    card = refund_qr(r.cfg, due)
+    link = card["link"]
+    check(card["qr"].startswith("data:image/svg+xml;base64,") and card["payer_short"] == f"{b[:6]}…{b[-6:]}"
+          and link == f"{site}/refund?uri=" + quote(due["uri"], safe="")
+          and query(link)["uri"] == due["uri"] and "%2B" in link and "+" not in link,
+          "its QR as an SVG data URI, the payer as its first and last 6 characters, and the Freighter button's "
+          "<APP_URL>/refund?uri=<encodeURIComponent(uri)> (the + of web+stellar: as %2B)")
+    check(refund_qr(replace(r.cfg, app_url=""), due)["link"] is None, "no APP_URL: the QR only, no button")
+    st.on_host_payment(Payment("ef" * 32, "op-p", HOST, Decimal("0.5"), "XLM", f"refund {newest}", "", "horizon",
+                               destination=b))
+    due = r.snap()["refund_due"]
+    check(due["amount"] == "1.5" and due["uri"] == refund_uri(r.cfg, b, Decimal("1.5"), newest) and due["count"] == 2,
+          "paid in part: the card asks for what is left")
+    st.on_host_payment(Payment("ef" * 32, "op-q", HOST, Decimal("1.5"), "XLM", f"refund {newest}", "", "horizon",
+                               destination=b))
+    check(r.snap()["refund_due"]["ref"] == first and r.snap()["refund_due"]["count"] == 1,
+          "paid off: the one before it shows")
+    check(custody_rig(tmp / "custody").st.snapshot()["refund_due"] is None, "custody: never")
+
+    main = sys.modules.get("main") or import_main(tmp)
+    main.handle_payment(Payment("12" * 32, "op-m", a, Decimal("1"), "XLM", None, "", "horizon"))
+    shown = main.snapshot()["refund_due"]
+    main.station.on_host_payment(Payment("34" * 32, "op-n", HOST, Decimal("1"), "XLM", f"refund {shown['ref']}", "",
+                                         "horizon", destination=a))
+    check(shown["qr"].startswith("data:image/svg+xml;base64,") and shown["payer"] == a and shown["link"] is None
+          and main.snapshot()["refund_due"] is None,
+          "main.py's snapshot carries it with its QR (no APP_URL here: no link), and drops it once refunded")
+
+    html = (Path(__file__).resolve().parent / "static" / "index.html").read_text(encoding="utf-8")
+    readings = re.search(r'<section class="readings">.*?</section>', html, re.S).group(0)
+    side = re.search(r'<aside class="side">.*?</aside>', html, re.S).group(0)
+    check('id="refundqr"' in readings and "refundcard" not in side
+          and ".readings > .refundcard { grid-area: tiles;" in html
+          and "body.has-refund .row.live { display: none; }" in html,
+          "the screen: the refund card in the readings, where the tiles are while waiting, never in the pay column")
+    check('<a class="refundbtn" id="refundlink" target="_blank" rel="noopener noreferrer">Refund with Freighter</a>'
+          in html and '$("refundlink").href = rd.link' in html and "body.refund-link .refundbtn" in html,
+          "the 'Refund with Freighter' button opens the site's page in a new tab, only with APP_URL")
+    check('!custody && (st === "AWAITING_PAYMENT" || st === "COURTESY") ? d.refund_due : null' in html
+          and '"newest of " + rd.count' in html and "rd.payer_short" in html and "amount(rd.amount)" in html
+          and "Not a pay QR: the host's wallet pays it back to the payer in the log." in html,
+          "shown in direct mode while waiting only (never over a session being served), with the amount, the "
+          "payer shortened, the ref, a count when several are due, and 'not a pay QR'")
 
 
 def test_robustness(tmp: Path) -> None:
@@ -4936,7 +4999,7 @@ if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
              ("i", test_money), ("i2", test_refund_uri), ("i3", test_refunds_due), ("j", test_robustness),
-             ("k", test_screens), ("l", test_wrong_asset), ("l2", test_refunded),
+             ("k", test_screens), ("l", test_wrong_asset), ("l2", test_refunded), ("l3", test_refund_screen),
              ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
              ("m4", test_horizon_network), ("m5", test_public_rechecks),
              ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),

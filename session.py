@@ -2394,6 +2394,7 @@ class Station:
         log_error = self.log.error or (f"{len(self.pending)} record(s) waiting" if self.pending else None)
         waiting = self.state in (State.AWAITING_PAYMENT, State.COURTESY)
         receipt, turn, turns = self._shown_receipt() if waiting else (None, 0, 0)
+        due = self.refunds_due[-1] if self.refunds_due and not self.cfg.custody else None
         return {
             "state": self.state.value,
             "session_id": s.id,
@@ -2446,6 +2447,14 @@ class Station:
             # which one of them it is.
             "last_receipt": receipt["record"] if receipt else None,
             "last_receipt_turn": [turn, turns] if turns > 1 else None,
+            # Direct mode: the newest refund the host still owes, what is left
+            # of it and the URI that pays that, and how many are due (the
+            # screen shows it while waiting; main.py adds its QR).
+            "refund_due": ({"ref": due["ref"], "payer": due["payer"], "amount": format_amount(due["left"]),
+                            "asset": due["asset"], "asset_issuer": due["asset_issuer"],
+                            "uri": refund_uri(self.cfg, due["payer"], due["left"], due["ref"], due["asset"],
+                                              due["asset_issuer"]),
+                            "count": len(self.refunds_due)} if due else None),
         }
 
     def say(self, text: str, seconds: float = 6.0) -> None:
