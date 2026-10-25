@@ -210,6 +210,13 @@ def test_mains(tmp: Path) -> None:
     r.pay("1", memo=None)
     r.pay("1", memo="FNOPE")
     check([x["reason"] for x in r.records()[-2:]] == ["no valid memo", "unknown session"], "orphans logged")
+    r.pay("0.0001000", memo=None)  # a look-alike sender's poisoning payment
+    r.pay("0.0001000", memo="visit-our-site")
+    check([(x["kind"], x["reason"]) for x in r.records()[-2:]]
+          == [("dust", "no valid memo, below the price of 1 ficha: not refunded"),
+              ("dust", "unknown session, below the price of 1 ficha: not refunded")]
+          and r.snap()["remaining_seconds"] == 1497,
+          "dust (below 1 ficha, no session of this station): logged as dust, never as a refund due")
 
     sid = st.session.id
     r.tick(1497)
@@ -220,6 +227,9 @@ def test_mains(tmp: Path) -> None:
     check(r.records()[-1]["reason"] == "session already closed", "payment to finished session is orphan")
     check(f"1 XLM paid after session {sid} ended: not credited" in r.snap()["notice"],
           "payment on the FINISHED screen: the screen says it was not credited")
+    r.pay("0.5", memo=sid)
+    check((r.records()[-1]["kind"], r.records()[-1]["reason"]) == ("orphan", "session already closed"),
+          "below 1 ficha but with a closed session's memo: a real payer, an orphan to refund, not dust")
     r.tick(r.cfg.finished_seconds)
     check(st.state == State.AWAITING_PAYMENT and st.session.id != sid, "new session id after FINISHED")
     rec = [x for x in r.records() if x["kind"] == "session"][-1]

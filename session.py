@@ -450,7 +450,7 @@ class Station:
         lines = self.log.read()
         for pos, r in enumerate(lines):
             kind = r.get("kind")
-            if kind in ("credited", "orphan", "underpaid", "refused", "settled") and "op_id" in r:
+            if kind in ("credited", "orphan", "underpaid", "refused", "dust", "settled") and "op_id" in r:
                 self.handled.add(payment_key(r.get("tx_hash"), r.get("op_id")))
             if kind == "session" and r.get("id"):
                 self.closed_ids.add(r["id"])
@@ -785,6 +785,12 @@ class Station:
             reason = "session already closed"
         else:
             reason = "unknown session"
+        if reason != "session already closed" and self.fichas_for(p.amount) < 1:
+            # Below 1 ficha and naming none of this station's sessions: dust,
+            # typically address poisoning (a look-alike sender, so the host
+            # copies the wrong address from its history). Logged, never refunded.
+            self._log_uncredited(p, "dust", f"{reason}, below the price of 1 ficha: not refunded")
+            return
         self._log_uncredited(p, "orphan", reason)
         # Paid on the FINISHED screen, or just after (the last seconds of the
         # countdown, say): the payer is likely still here, so say it.

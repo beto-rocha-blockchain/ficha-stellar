@@ -366,6 +366,13 @@ footer.
   station's (USDC at an XLM station, or USDC from another issuer) whose memo
   is this station's is logged as `refused`, reason `wrong asset`, with the
   code and issuer actually paid. The host refunds these in full.
+  A payment below 1 ficha that names none of this station's sessions (no
+  memo, or an unknown one) is logged as `dust` and is **not** refunded: it
+  is typically address poisoning, a tiny payment from a look-alike address
+  (same first and last characters as one the host uses) so that the host
+  later copies the wrong address from its history. Refunds always go to the
+  `payer` written in the log line, never to an address taken from a wallet's
+  history.
 
   Money that was credited but bought no energy is spelled out in each
   session record:
