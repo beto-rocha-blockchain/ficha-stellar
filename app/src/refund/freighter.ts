@@ -113,9 +113,11 @@ export async function signWithFreighter(tx: Transaction, net: NetworkConfig, hos
 /**
  * Build, sign in Freighter and submit, once. A SubmitError "unknown" means
  * it MAY have gone through: the caller never sends it again on its own.
+ * `onSigned`: Freighter has signed, the submit starts.
  */
-export async function sendRefund(r: RefundRequest, hostKey: string): Promise<{ hash: string; ledger: number }> {
+export async function sendRefund(r: RefundRequest, hostKey: string, onSigned?: () => void): Promise<{ hash: string; ledger: number }> {
   const tx = await buildRefundTx(r, hostKey);
   const signed = await signWithFreighter(tx, r.net, hostKey);
+  onSigned?.();
   return submitTx(r.net, signed);
 }

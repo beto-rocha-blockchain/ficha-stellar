@@ -5,6 +5,8 @@ import { Account, Asset, Horizon, Keypair, Networks, Operation, TransactionBuild
 import { clear, createStore } from "idb-keyval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "@/config";
+import { DICTS, LANGS } from "@/i18n";
+import { reloadIsSafe } from "@/native/service-worker";
 import { getRegistry, type Registry, type Station } from "@/registry";
 import { buildRefundTx, connectFreighter, freighterBlocks, readFreighter, sendRefund, type FreighterSession } from "./freighter";
 import { RefundError, checkRefund, parseRefundRef, parseRefundUri, refundCap } from "./request";
@@ -338,5 +340,24 @@ describe("the refund transaction", () => {
     });
     await expect(sendRefund(r, host.publicKey())).rejects.toMatchObject({ code: "bad_signature", message: "signed by another account" });
     expect(submitted).toEqual([]);
+  });
+});
+
+describe("the /refund page", () => {
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+
+  it("is public: the host needs no Ficha wallet and no PIN, it signs in Freighter", () => {
+    expect(read("../routes/__root.tsx")).toMatch(/const PUBLIC_PATHS = \[[^\]]*"\/refund"[^\]]*\];/);
+    // A new build never reloads it under the host while a refund is being signed.
+    expect(reloadIsSafe("/refund", "none")).toBe(false);
+    expect(reloadIsSafe("/refund", "locked")).toBe(false);
+  });
+
+  it("has every message it shows, in every language", () => {
+    const states = ["no_station", "no_registry", "unknown_station", "inactive", "custody", "asset_mismatch", "over_cap"];
+    const keys = [...states.map((s) => `block.${s}`), "badLink", "wrongNetwork", "wrongAccount", "notInstalled", "refused", "badSignature", "unknownOutcome"];
+    const page = read("../routes/refund.tsx");
+    for (const s of states) expect(page, s).toContain(`case "${s}":`);
+    for (const lang of LANGS) for (const k of keys) expect(DICTS[lang][`refund.${k}`], `${lang} ${k}`).toBeTruthy();
   });
 });

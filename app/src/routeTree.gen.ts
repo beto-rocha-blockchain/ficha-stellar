@@ -17,6 +17,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as PRouteImport } from './routes/p'
 import { Route as PayRouteImport } from './routes/pay'
 import { Route as RRouteImport } from './routes/r'
+import { Route as RefundRouteImport } from './routes/refund'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as WelcomeRouteImport } from './routes/welcome'
@@ -65,6 +66,11 @@ const RRoute = RRouteImport.update({
   path: '/r',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RefundRoute = RefundRouteImport.update({
+  id: '/refund',
+  path: '/refund',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ScanRoute = ScanRouteImport.update({
   id: '/scan',
   path: '/scan',
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/p': typeof PRoute
   '/pay': typeof PayRoute
   '/r': typeof RRoute
+  '/refund': typeof RefundRoute
   '/scan': typeof ScanRoute
   '/settings': typeof SettingsRoute
   '/welcome': typeof WelcomeRoute
@@ -127,6 +134,7 @@ export interface FileRoutesByTo {
   '/p': typeof PRoute
   '/pay': typeof PayRoute
   '/r': typeof RRoute
+  '/refund': typeof RefundRoute
   '/scan': typeof ScanRoute
   '/settings': typeof SettingsRoute
   '/welcome': typeof WelcomeRoute
@@ -145,6 +153,7 @@ export interface FileRoutesById {
   '/p': typeof PRoute
   '/pay': typeof PayRoute
   '/r': typeof RRoute
+  '/refund': typeof RefundRoute
   '/scan': typeof ScanRoute
   '/settings': typeof SettingsRoute
   '/welcome': typeof WelcomeRoute
@@ -164,6 +173,7 @@ export interface FileRouteTypes {
     | '/p'
     | '/pay'
     | '/r'
+    | '/refund'
     | '/scan'
     | '/settings'
     | '/welcome'
@@ -181,6 +191,7 @@ export interface FileRouteTypes {
     | '/p'
     | '/pay'
     | '/r'
+    | '/refund'
     | '/scan'
     | '/settings'
     | '/welcome'
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '/p'
     | '/pay'
     | '/r'
+    | '/refund'
     | '/scan'
     | '/settings'
     | '/welcome'
@@ -216,6 +228,7 @@ export interface RootRouteChildren {
   PRoute: typeof PRoute
   PayRoute: typeof PayRoute
   RRoute: typeof RRoute
+  RefundRoute: typeof RefundRoute
   ScanRoute: typeof ScanRoute
   SettingsRoute: typeof SettingsRoute
   WelcomeRoute: typeof WelcomeRoute
@@ -283,6 +296,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/refund': {
+      id: '/refund'
+      path: '/refund'
+      fullPath: '/refund'
+      preLoaderRoute: typeof RefundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/scan': {
       id: '/scan'
       path: '/scan'
@@ -344,6 +364,7 @@ const rootRouteChildren: RootRouteChildren = {
   PRoute: PRoute,
   PayRoute: PayRoute,
   RRoute: RRoute,
+  RefundRoute: RefundRoute,
   ScanRoute: ScanRoute,
   SettingsRoute: SettingsRoute,
   WelcomeRoute: WelcomeRoute,

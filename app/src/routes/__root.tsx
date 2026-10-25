@@ -4,7 +4,8 @@
  *                     opened so is kept and opened once the wallet exists
  *  - locked        -> full-screen PIN prompt (except PUBLIC_PATHS)
  *  - unlocked      -> app shell
- * PUBLIC_PATHS work without an unlocked wallet (map, venue list, receipt link, the battery reading).
+ * PUBLIC_PATHS work without an unlocked wallet (map, venue list, receipt link, the battery reading,
+ * and the host's refund page, signed in Freighter).
  */
 import { useEffect } from "react";
 import { Link, Navigate, Outlet, createRootRoute, useNavigate, useRouterState } from "@tanstack/react-router";
@@ -19,7 +20,7 @@ import { useT } from "@/i18n";
 import { clearPendingLink, pendingLink, rememberPendingLink } from "@/lib/pending-link";
 import { useAutoLock, useWallet } from "@/wallet";
 
-const PUBLIC_PATHS = ["/stations", "/estabelecimentos", "/r", "/battery"];
+const PUBLIC_PATHS = ["/stations", "/estabelecimentos", "/r", "/battery", "/refund"];
 
 function matches(path: string, base: string): boolean {
   return path === base || path.startsWith(`${base}/`);
