@@ -216,6 +216,63 @@ against the user's own on-chain payment. This is the direct-mode receipt,
   was charging from another socket; `wh` and `x` count only verified
   readings.
 
+### 3.1 Refund URI (direct mode)
+
+A direct-mode station holds no key and cannot refund: the host refunds from
+its own wallet. For each refund due the station shows its operator a
+SEP-0007 pay request, paid by the HOST to the PAYER, as a QR (for the
+host's mobile wallet) and as a button to the Ficha site:
+
+```
+web+stellar:pay?destination=<payer G…>&amount=<amount>&memo=<URL-encoded "refund <REF>">&memo_type=MEMO_TEXT&msg=<URL-encoded "Ficha refund · <REF>">
+```
+
+- `destination`: the payer the station's log has for that payment, never
+  an address from a wallet's history (address poisoning: a look-alike
+  address sends the host a tiny payment so it is copied by mistake).
+- `amount`: at most 7 decimals, no trailing zeros needed.
+- `asset_code` and `asset_issuer` follow `amount`, for an issued asset
+  only: a refund goes back in the asset that was paid.
+- `network_passphrase` comes before `msg` on every network except public:
+  a URI without it is a public-network request, as for the pay QR
+  (section 1).
+- `memo` and `msg` are URL-encoded. `<REF>` is the session ID
+  `<STATION_ID>.<SESSION>` for a session's refund (`refund 8DY7RJ.FAFXJXBZ`
+  is 22 bytes; a text memo holds 28). For an uncredited payment (orphan,
+  refused, underpaid) whose memo names none of the station's sessions it
+  is `<STATION_ID>.tx<first 8 hex of the transaction hash>` when that fits
+  in 28 bytes, else `tx<first 12 hex>` (a station without `STATION_ID`).
+- The operator's button opens
+  `<APP_URL>/refund?uri=<encodeURIComponent(the URI)>`
+  (`APP_URL=https://ficha-stellar.vercel.app` on the demo stations). The
+  app finds the host by the station ID in `<REF>`: it resolves that ID in
+  the signed registry of the URI's network and requires the signing
+  account to be that station's `host_key`.
+- What is due, in `sessions.jsonl`: a paid session's line carries
+  `refunds`, one per payer,
+  `{"payer", "amount", "asset", "asset_issuer" (issued assets only), "ref", "memo", "uri"}`:
+  the payer's change plus its share of the capped and unused time's value
+  (`refund_hint`), split by what each payer credited and rounded down to
+  the stroop, so the sum never exceeds what is due (an interrupted
+  session: the change only). Each `orphan`, `refused` and `underpaid` line
+  carries one for its whole amount; `dust` never. Lines logged before
+  `refunds` existed have none.
+- When Horizon lists a payment the host sent whose memo is `refund <REF>`
+  of a refund still due, to that refund's payer and in its asset, the
+  station logs
+
+  ```json
+  {"kind": "refunded", "ref": "8DY7RJ.FAFXJXBZ", "payer": "G…", "amount": "0.95", "asset": "XLM",
+   "tx_hash": "…", "op_id": "…", "at": "2026-10-25T18:00:00Z", "due": "0.95", "left": "0"}
+  ```
+
+  (with `asset_issuer` for an issued asset, `network`, `host_key`, `memo`
+  and `source`, and `excess` when it paid more than was due). `left` stays
+  due, and the screen asks for it. A payment the host sends never credits
+  a session, whatever its memo; one with any other memo, destination or
+  asset is the host's own business and is ignored.
+- Custody mode has none of this: the receipt's proof refunds (section 7).
+
 ## 4. Money rules the app must keep
 
 - Direct mode: pay only by the station's SEP-0007 QR: destination =
@@ -281,8 +338,9 @@ the default; `false` is for bench tests and refused on the public network):
 ## 6. The Ficha site
 
 `https://ficha-stellar.vercel.app/` serves what both sides point at: the
-live signed registry (section 2), the receipt links (section 3), the custody
-pay links (section 7.3) and the web app itself, at the root path.
+live signed registry (section 2), the receipt links (section 3), the host's
+refund page (`/refund`, section 3.1), the custody pay links (section 7.3) and
+the web app itself, at the root path.
 
 - Hosting: the Vercel project `ficha`, which deploys the private site
   repository on each push. That repository holds only the built site;
