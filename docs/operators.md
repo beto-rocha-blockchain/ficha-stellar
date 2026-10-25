@@ -57,6 +57,7 @@ station opens the relay for 3 s to check that the current is its own
 | courtesy (60 s free, once) | press **C** on the station screen |
 | end the session (or courtesy) now, `end_reason` `stopped`: the payer asked to stop, or a demo shows the refund | press **E** on the station screen |
 | cut power now (emergency), `end_reason` `emergency_stop` | press **ESC** on the station screen |
+| show the newest refund due for 60 s, its QR and its Freighter button (a real payer only: add `"payer": "G…"` to the fake payment, press E and wait for the next session) | press **R** on the station screen while it waits for a payment; R again hides it |
 | unplug the fake phone mid-session, then plug it back in (the countdown pauses, then a probe resumes it) | press **U** on the station screen while charging (`MOCK=true` only; the header shows it) |
 | offer a network ("Get online" QR) | set `WIFI_SSID` and `WIFI_PASSWORD` in `.env` |
 | free emergency minutes: 2 min of charge and 2 min of internet per phone per day, the emergency numbers (section 3) | open http://127.0.0.1:8000/portal (`WIFI_PORTAL=simulate` in `.env.example`); `?clientmac=02:11:22:33:44:55` plays another phone |
@@ -335,7 +336,7 @@ Horizon first answers and whenever it has not answered for 10 s (or for
 three polls, with a `HORIZON_POLL_SECONDS` above 3.3): a real payment made
 then would not be seen until it does. A payment made just before is credited
 when Horizon answers again. On testnet a failing Horizon only shows in the
-footer.
+footer, and keeps the refund card off (below).
 
 ### Refunds by hand (direct mode)
 
@@ -349,25 +350,48 @@ due, shows it on its screen and sees it paid; the host signs:
    (`refund_hint`), split by what each payer credited, each rounded down to
    the stroop so together they never exceed what is due. An `interrupted`
    session has each payer's change only: the rest is unknown, and the host
-   decides. Each `orphan`, `refused` and `underpaid` line carries one for
-   its whole amount, to its own payer, in the asset it came in. `dust`
-   lines never do (section 5), and neither does a debug payment's made-up
-   payer. Lines logged before the station had `refunds` are not filled in:
-   refund those from `refund_hint` and the uncredited lines, as before.
-2. **The screen shows them.** While the station waits for a payment, an
-   operator card **Refund due** sits where the tiles are, never over the
-   pay QR: the newest refund still due, with its amount, the payer's first
-   and last 6 characters, its ref and, when several are due, how many. It
-   is dashed and says "not a pay QR"; it does not show while a session is
-   being served (charging, the FINISHED screen). The host pays it either
-   way:
+   decides. An `orphan`, `refused` or `underpaid` line carries one for its
+   whole amount, to its own payer, in the asset it came in, only when its
+   memo names this station (one of its sessions, or a session memo with
+   its `STATION_ID`) and it is 1 ficha or more. The others carry none and
+   never show on screen; the host judges them by hand, from their line:
+   - no memo, or a memo naming none of this station's sessions (an
+     exchange's own reference, say): it may be the host's own money, a
+     top-up from an exchange whose shared account a refund would never
+     reach, and every station sharing the host key would owe it again;
+   - below 1 ficha, whatever its memo: a look-alike of a payer can copy
+     the memo of its payment from the ledger and send a tiny amount, so
+     that the host pays it back and has the look-alike among its recent
+     recipients.
+
+   `dust` lines never carry one (section 5), and neither does a debug
+   payment's made-up payer. Lines logged before the station had `refunds`
+   are not filled in: refund those from `refund_hint` and the uncredited
+   lines, as before.
+2. **The screen shows them on R.** The footer's `refunds` item says how
+   many are due. The card's QR is a pay request that any wallet can pay:
+   a customer who scanned it for the pay QR would pay the previous payer,
+   not the host, so it is never on screen unasked. Press **R** (the
+   header lists it while it can show) and an operator card **Refund due**
+   sits for 60 s where the tiles are, never over the pay QR: the newest
+   refund still due, with its amount, the payer's first and last 6
+   characters, its ref, the seconds left and, when several are due, how
+   many. R again hides it. It shows only while the station waits for a
+   payment with its pay QR on screen: not during a courtesy, a session or
+   its FINISHED screen, and not out of service; once it hides by itself,
+   only R shows it again. It is dashed and says "not a pay QR". The host
+   pays it either way:
    - **Freighter mobile** (or another SEP-7 wallet holding the host
      account): scan the card's QR, check the amount and the address, sign.
    - **Freighter on this laptop**: **Refund with Freighter** (with
      `APP_URL` set) opens the Ficha site's `/refund` page in a new tab. It
      checks the refund against the signed registry (the ref's station and
-     its host key) and asks the Freighter extension to sign it as the host
-     account.
+     its host key) and the host's payments on the ledger (at most what
+     that payer paid the host under the ref, and nothing once the host has
+     sent it any refund with that memo: pay a remainder from the phone),
+     and asks the Freighter extension to sign it as the host account. Only
+     the station's own card says what is due: never sign a `/refund` link
+     that came from anywhere else.
 3. **The station marks it refunded** when Horizon shows a payment from the
    host with memo `refund <REF>`, to that refund's payer and in its asset:
    a `refunded` line in the log, a notice on screen, and the card moves on
@@ -375,7 +399,13 @@ due, shows it on its screen and sees it paid; the host signs:
    asks for what is left); more than due clears it, and the line says the
    `excess`. Any other payment the host sends is its own business and is
    ignored; none ever credits a session. What is still due survives a
-   restart: it is rebuilt from the log.
+   restart: it is rebuilt from the log. While the station cannot see a
+   refund paid (Horizon not answering, as for the public network's out of
+   service above but on any network, or the log not writable), no card
+   shows, R says why, and the footer item turns
+   red: "do not pay one again". A refund paid meanwhile, from the phone,
+   say, would not move the card on: wait until it clears, and the station
+   marks it refunded when Horizon hands that payment over.
 4. **The destination always comes from the log**, never from a wallet's
    history or its "recent" addresses: a look-alike address (same first and
    last characters) may have sent the host a tiny payment exactly so that
@@ -385,7 +415,8 @@ due, shows it on its screen and sees it paid; the host signs:
    and last 6 characters.
 5. Memo `refund <REF>` (a text memo): the session ID for a session's
    refund (`refund 8DY7RJ.FAFXJXBZ`, 22 of the 28 bytes), and for a payment
-   whose memo names none of this station's sessions
+   whose memo has this station's ID but no session it knows (a pay QR
+   shown before a restart, say)
    `<STATION_ID>.tx<first 8 hex of its transaction hash>`. A payer who paid
    from an exchange's shared account needs the exchange's own memo: ask, or
    the refund is lost. Paid with that memo, the station cannot tell it is
@@ -430,13 +461,18 @@ due, shows it on its screen and sees it paid; the host signs:
   reason `station out of service`. A payment in another asset than the
   station's (USDC at an XLM station, or USDC from another issuer) whose memo
   is this station's is logged as `refused`, reason `wrong asset`, with the
-  code and issuer actually paid. The host refunds these in full.
+  code and issuer actually paid. The host refunds these in full; the
+  station screen shows those of 1 ficha or more whose memo names this
+  station as refunds due (section 4, "Refunds by hand"), and the host
+  judges the others by hand.
   A payment below 1 ficha that names none of this station's sessions (no
   memo, or an unknown one) is logged as `dust` and is **not** refunded: it
   is typically address poisoning, a tiny payment from a look-alike address
   (same first and last characters as one the host uses) so that the host
-  later copies the wrong address from its history. Refunds always go to the
-  `payer` written in the log line, never to an address taken from a wallet's
+  later copies the wrong address from its history. One that copies a
+  session's memo from the ledger is logged as `underpaid` or `orphan`, but
+  is never a refund due on screen either. Refunds always go to the `payer`
+  written in the log line, never to an address taken from a wallet's
   history.
 
   Money that was credited but bought no energy is spelled out in each
@@ -460,9 +496,10 @@ due, shows it on its screen and sees it paid; the host signs:
     It is a hint for the host, who decides and pays the refund by hand; an
     `interrupted` session has only `change` (the rest is unknown).
   - `refunds`: the same money per payer, each with its SEP-7 refund URI,
-    which the station screen shows until the host pays it (section 4,
-    "Refunds by hand"). Each `orphan`, `refused` and `underpaid` line has
-    one too; `dust` never.
+    which the station screen shows on R until the host pays it (section
+    4, "Refunds by hand"). Each `orphan`, `refused` and `underpaid` line of
+    1 ficha or more whose memo names this station has one too; `dust`
+    never.
 - **Receipt.** When a paid session ends, the FINISHED screen shows a receipt
   QR for `FINISHED_SECONDS` (20 s) instead of the pay QR: memo, network,
   host key, amount, fichas, paid seconds, seconds charged here (`u`, the
