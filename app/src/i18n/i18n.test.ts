@@ -125,4 +125,18 @@ describe("i18n", () => {
     expect(vite).toContain('description: "Ficha: pay-per-minute phone charging on Stellar.');
     expect(vite).not.toContain("Carteira Ficha: pague");
   });
+
+  it("says before Mainnet: real money, another balance at the same address, keep the words or key safe", () => {
+    const say = {
+      "pt-BR": [/dinheiro de verdade/, /endereço é o mesmo.*saldo é outro/, /palavras de recuperação/, /chave secreta/, /^Mainnet: dinheiro de verdade/],
+      en: [/real money/, /address is the same.*balance is different/, /recovery words/, /secret key/, /^Mainnet: real money/],
+    };
+    for (const lang of ["pt-BR", "en"] as const) {
+      const keys = ["settings.mainnetMoney", "settings.mainnetBalance", "settings.mainnetWords", "settings.mainnetSecret", "pay.pay.mainnet"];
+      keys.forEach((key, i) => expect(translate(lang, key), `${lang} ${key}`).toMatch(say[lang][i]));
+    }
+    // Switching to Mainnet goes through the dialog; back to the testnet does not.
+    const settings = readFileSync(fileURLToPath(new URL("../routes/settings.tsx", import.meta.url)), "utf8");
+    expect(settings).toContain('if (id === "public") setMainnetOpen(true);');
+  });
 });

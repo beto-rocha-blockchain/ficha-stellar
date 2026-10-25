@@ -413,6 +413,12 @@ function PayForm({ req, memo }: { req: PayRequest; memo: FichaMemo }) {
         <RetryNotice text={t("pay.paidCheckFailed")} reason={describeStellarError(paid.error)} onRetry={() => setPaidAttempt((a) => a + 1)} />
       )}
 
+      {net.id !== "testnet" && (
+        // Said again next to the button that spends it.
+        <p className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12px] font-medium">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" /> {t("pay.mainnet")}
+        </p>
+      )}
       <RequireUnlocked>
         <Button
           size="lg"

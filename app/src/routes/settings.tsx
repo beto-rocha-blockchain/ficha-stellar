@@ -61,11 +61,17 @@ function Settings() {
   const [revealOpen, setRevealOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
   const [biometricOn, setBiometricOn] = useState(false);
+  const [mainnetOpen, setMainnetOpen] = useState(false);
 
-  const changeNetwork = (id: NetworkId) => {
-    if (id === network) return;
+  const switchTo = (id: NetworkId) => {
     setNetwork(id);
     toast.success(t("networkChanged", { network: NETWORKS[id].label }));
+  };
+  const changeNetwork = (id: NetworkId) => {
+    if (id === network) return;
+    // Real money: confirmed first. Back to the testnet needs no confirmation.
+    if (id === "public") setMainnetOpen(true);
+    else switchTo(id);
   };
 
   return (
@@ -139,6 +145,14 @@ function Settings() {
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/70">{t("version", { v: __APP_VERSION__ })}</p>
       </Section>
 
+      <MainnetDialog
+        open={mainnetOpen}
+        onOpenChange={setMainnetOpen}
+        onConfirm={() => {
+          setMainnetOpen(false);
+          switchTo("public");
+        }}
+      />
       <RevealDialog open={revealOpen} onOpenChange={setRevealOpen} />
       <RemoveWalletDialog open={removeOpen} onOpenChange={setRemoveOpen} requirePin />
     </div>
@@ -186,6 +200,34 @@ function AboutFacts({ network }: { network: NetworkId }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** Before switching to Mainnet: real money, another balance, and the words that guard it. Cancel stays on the testnet. */
+function MainnetDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (o: boolean) => void; onConfirm: () => void }) {
+  const t = useT("settings");
+  const kind = useWallet((s) => s.kind);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{t("mainnetTitle")}</DialogTitle>
+          <DialogDescription>{t("mainnetMoney")}</DialogDescription>
+        </DialogHeader>
+        <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+          <li>{t("mainnetBalance")}</li>
+          <li>{t(kind === "secret" ? "mainnetSecret" : "mainnetWords")}</li>
+        </ul>
+        <DialogFooter className="gap-2">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            {t("mainnetStay")}
+          </Button>
+          <Button type="button" onClick={onConfirm}>
+            {t("mainnetConfirm")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
