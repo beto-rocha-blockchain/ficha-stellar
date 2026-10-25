@@ -145,8 +145,10 @@ signature in `registry/stations.json.sig`.
   absent = direct) and, in custody mode, `ESCROW_CONTRACT` (`escrow`),
   `REFUND_UNIT_SECONDS` (`unit_seconds`) and `ESCROW_GRACE_SECONDS`
   (`grace_seconds`); otherwise, or on a bad signature, it refuses to
-  start and lists each difference. With no copy readable it starts and shows
-  "registry unchecked". `REGISTRY_CHECK=false` skips it (development only).
+  start and lists each difference. With no copy readable a testnet station
+  starts and shows "registry unchecked"; on the public network it does not
+  start until the check passes. `REGISTRY_CHECK=false` skips it (development
+  only; refused on the public network).
   So what the app shows and charges is what the station sells. A custody
   station then checks the contract too (section 7.5).
 - A custody station runs the same check again every minute while it runs,
