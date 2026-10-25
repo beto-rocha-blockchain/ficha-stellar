@@ -221,7 +221,12 @@ against the user's own on-chain payment. This is the direct-mode receipt,
 A direct-mode station holds no key and cannot refund: the host refunds from
 its own wallet. For each refund due the station shows its operator a
 SEP-0007 pay request, paid by the HOST to the PAYER, as a QR (for the
-host's mobile wallet) and as a button to the Ficha site:
+host's mobile wallet) and as a button to the Ficha site. Any wallet can
+pay such a request, so a customer who scanned it for the pay QR would pay
+the previous payer: the station shows the newest refund due only when the
+operator presses R, for 60 s, while it waits for a payment with its pay QR
+on screen, and never while it could not see a refund paid (Horizon not
+read, or its log not writable).
 
 ```
 web+stellar:pay?destination=<payer G…>&amount=<amount>&memo=<URL-encoded "refund <REF>">&memo_type=MEMO_TEXT&msg=<URL-encoded "Ficha refund · <REF>">
@@ -242,21 +247,37 @@ web+stellar:pay?destination=<payer G…>&amount=<amount>&memo=<URL-encoded "refu
   refused, underpaid) whose memo names none of the station's sessions it
   is `<STATION_ID>.tx<first 8 hex of the transaction hash>` when that fits
   in 28 bytes, else `tx<first 12 hex>` (a station without `STATION_ID`).
+  Only a memo with the station's own ID makes such a refund due (see
+  "what is due" below), so a station without `STATION_ID` owes none by a
+  transaction, and the app signs no `tx<first 12 hex>` ref.
 - The operator's button opens
   `<APP_URL>/refund?uri=<encodeURIComponent(the URI)>`
   (`APP_URL=https://ficha-stellar.vercel.app` on the demo stations). The
   app finds the host by the station ID in `<REF>`: it resolves that ID in
   the signed registry of the URI's network and requires the signing
-  account to be that station's `host_key`.
+  account to be that station's `host_key`. Such a link can come from
+  anywhere, and only the station's own card says what is due: the app
+  also reads the host's payments on that network and signs at most what
+  the destination paid the host under `<REF>` (memo `<REF>` for a
+  session; for a transaction's REF, a transaction whose hash starts with
+  its hex, of 1 ficha or more), in the refund's asset, and nothing once
+  the host has sent it any payment with the memo `refund <REF>` in that
+  asset (a remainder is paid from the station's QR).
 - What is due, in `sessions.jsonl`: a paid session's line carries
   `refunds`, one per payer,
   `{"payer", "amount", "asset", "asset_issuer" (issued assets only), "ref", "memo", "uri"}`:
   the payer's change plus its share of the capped and unused time's value
   (`refund_hint`), split by what each payer credited and rounded down to
   the stroop, so the sum never exceeds what is due (an interrupted
-  session: the change only). Each `orphan`, `refused` and `underpaid` line
-  carries one for its whole amount; `dust` never. Lines logged before
-  `refunds` existed have none.
+  session: the change only). An `orphan`, `refused` or `underpaid` line
+  carries one for its whole amount only when it is 1 ficha or more and
+  its memo names the station (one of its sessions, or a session memo with
+  its `STATION_ID`). The others carry none, for the host to judge by
+  hand: no memo or another memo (maybe the host's own money, a top-up from
+  an exchange, and owed again by every station sharing the host key), and
+  below 1 ficha whatever its memo (address poisoning copies a session's
+  memo from the ledger). `dust` never does. Lines logged before `refunds`
+  existed have none.
 - When Horizon lists a payment the host sent whose memo is `refund <REF>`
   of a refund still due, to that refund's payer and in its asset, the
   station logs
