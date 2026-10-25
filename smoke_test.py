@@ -1740,9 +1740,11 @@ def test_refund_screen(tmp: Path) -> None:
     check('(e.key === "r" || e.key === "R") && !e.ctrlKey' in html and 'send("r")' in html
           and 'id="d-refunds"' in html and 'dot("refunds"' in html
           and "body.custody .h.refunds { display: none; }" in html
-          and '"not seen paid now, do not pay one again · " + rd.unseen' in html,
-          "R on the station screen (never Ctrl+R, which reloads), and a footer item with how many are due and, "
-          "while one paid now would not be seen paid, not to pay one again (direct mode only)")
+          and '" · do not pay one again: " + rd.unseen' in html
+          and '<kbd>R</kbd><span id="kr">show refund</span>' in html and "body.refund-ready .keys .k-r" in html,
+          "R on the station screen (never Ctrl+R, which reloads), in the header's keys only while it can show one, "
+          "and a footer item with how many are due and, while one paid now would not be seen paid, not to pay one "
+          "again (direct mode only)")
 
 
 def test_robustness(tmp: Path) -> None:

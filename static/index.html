@@ -128,6 +128,9 @@
   .keys .k-u { display: none; }
   body.mock.s-CHARGING .keys .k-u { display: inline-flex; }
   body:not(.s-AWAITING_PAYMENT) .keys .k-c { display: none; }
+  /* Direct mode: R shows the newest refund due (or hides it), only while it can. */
+  .keys .k-r { display: none; }
+  body.refund-ready .keys .k-r { display: inline-flex; }
 
   /* main: the readings take all the width the pay column leaves, and the
      pay column is as wide as its QR card. */
@@ -428,7 +431,7 @@
   <div class="badge-delivering"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2 4 14h7l-1 8 10-12h-7z"/></svg>delivering</div>
   <div class="spacer"></div>
   <div class="sid"><span class="k">session</span><b id="sid">&mdash;</b></div>
-  <span class="keys"><span class="key"><kbd>ESC</kbd><span>cut power</span></span><span class="key k-e"><kbd>E</kbd><span>end session</span></span><span class="key k-u"><kbd>U</kbd><span id="ku">unplug</span></span><span class="key k-c"><kbd>C</kbd><span>courtesy</span></span></span>
+  <span class="keys"><span class="key"><kbd>ESC</kbd><span>cut power</span></span><span class="key k-e"><kbd>E</kbd><span>end session</span></span><span class="key k-u"><kbd>U</kbd><span id="ku">unplug</span></span><span class="key k-c"><kbd>C</kbd><span>courtesy</span></span><span class="key k-r"><kbd>R</kbd><span id="kr">show refund</span></span></span>
 </header>
 
 <main>
@@ -786,6 +789,8 @@
     // (charging, finished) is its payer's.
     var rd = !custody ? d.refund_due : null;
     var shown = !!(rd && rd.uri) && st === "AWAITING_PAYMENT" && !oos;
+    if (rd && !rd.unseen && st === "AWAITING_PAYMENT" && !oos) body.classList.add("refund-ready");
+    $("kr").textContent = shown ? "hide refund" : "show refund";
     if (shown) {
       body.classList.add("has-refund");
       if (rd.qr !== lastRefund) { $("refundqr").src = rd.qr; lastRefund = rd.qr; }
@@ -879,13 +884,13 @@
     var rg = d.registry || { status: "off", detail: "" };
     dot("registry", rg.status === "ok" ? "ok" : rg.status === "unchecked" ? "warn" : rg.status === "mismatch" ? "bad" : "off",
         rg.status + (rg.detail ? " · " + rg.detail : ""));
-    // Direct mode: the refunds the host owes; R shows the newest for a minute.
-    // While a refund paid now would not be seen paid (Horizon not read, the
-    // log not writable), none shows: the card would stay up as if the
-    // payment had failed, so the footer says not to pay one again.
-    if (!custody) dot("refunds", !rd ? "off" : rd.unseen ? "bad" : "warn", !rd ? "none"
-        : rd.count + " due · " + (rd.unseen ? "not seen paid now, do not pay one again · " + rd.unseen
-        : "R " + (shown ? "hides it" : "shows it")));
+    // Direct mode: the refunds the host owes (R, in the header, shows the
+    // newest for a minute). While a refund paid now would not be seen paid
+    // (Horizon not read, the log not writable), none shows: the card would
+    // stay up as if the payment had failed, so the footer says not to pay
+    // one again.
+    if (!custody) dot("refunds", !rd ? "off" : rd.unseen ? "bad" : "warn",
+        !rd ? "none" : rd.count + " due" + (rd.unseen ? " · do not pay one again: " + rd.unseen : ""));
     // Custody: the contract, its events, whether its terms were checked at
     // startup, and this computer's clock when it is far from ledger time
     // (deadlines follow the ledger anyway; the log's times do not).
