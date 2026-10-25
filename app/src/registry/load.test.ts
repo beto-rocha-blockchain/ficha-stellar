@@ -53,10 +53,13 @@ afterEach(() => {
 });
 
 describe("registry loading: live first, the bundled copy as fallback", () => {
-  it("points the testnet app at the registry on the Ficha site; none for the public network yet", () => {
+  it("points each network at its own registry on the Ficha site, pinned with its own key", () => {
     expect(SITE_URL).toBe("https://ficha-stellar.vercel.app/");
     expect(NETWORKS.testnet.liveRegistryUrl).toBe("https://ficha-stellar.vercel.app/registry/stations.json");
-    expect(NETWORKS.public.liveRegistryUrl).toBeNull();
+    expect(NETWORKS.public.liveRegistryUrl).toBe("https://ficha-stellar.vercel.app/registry/stations.public.json");
+    expect(NETWORKS.public.registryUrl.endsWith("registry/stations.public.json")).toBe(true);
+    expect(NETWORKS.public.registryKey).toBe("GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG");
+    expect(NETWORKS.public.registryKey).not.toBe(NETWORKS.testnet.registryKey);
   });
 
   it("uses the live copy when it verifies", async () => {

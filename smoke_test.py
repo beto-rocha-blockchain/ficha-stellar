@@ -144,18 +144,30 @@ def refused(cfg: config.Config, what: str, says: str = "") -> None:
     check(False, f"refused: {what}")
 
 
-# Stands for the public registry's key: this version pins none yet.
-PUBLIC_REGISTRY_KEY = Keypair.random().public_key
+# The public registry's key, the one this version pins.
+PUBLIC_REGISTRY_KEY = config.REGISTRY_KEYS["public"]
 ADB_SERIAL = "192.168.0.20:5555"
 
 
 def on_public(cfg: config.Config, **over) -> config.Config:
     """cfg as a station on the public network must be (a real relay and
-    phone, charge verification, a STATION_ID, a registry key), with these
-    changes."""
+    phone, charge verification, a STATION_ID, the pinned registry key), with
+    these changes."""
     return replace(cfg, **{"network": "public", "horizon_url": config.HORIZON_URLS["public"], "mock": False,
                            "mock_payment": False, "charge_verify": True, "adb_serial": ADB_SERIAL,
                            "station_id": "K7M2QX", "registry_key": PUBLIC_REGISTRY_KEY, **over})
+
+
+@contextlib.contextmanager
+def pinned_public(key: str):
+    """config as a version that pins `key` for public ("" = none) would have
+    it, then as it was."""
+    saved = config.REGISTRY_KEYS["public"]
+    config.REGISTRY_KEYS["public"] = key
+    try:
+        yield
+    finally:
+        config.REGISTRY_KEYS["public"] = saved
 
 
 def load_env(**env: str) -> config.Config:
@@ -537,6 +549,11 @@ def test_registry(tmp: Path) -> None:
     committed = json.loads((root / "registry" / "stations.json.sig").read_text(encoding="utf-8"))
     check(pinned is not None and registry.verify_bytes(data, committed, pinned.group(1)) == pinned.group(1),
           "committed registry signed by the key pinned in the contract")
+    public_key = re.search(r"Registry key \(public\): (G[A-Z2-7]{55})", contract)
+    app_config = (root / "app" / "src" / "config.ts").read_text(encoding="utf-8")
+    check(public_key is not None and public_key.group(1) == config.REGISTRY_KEYS["public"] != pinned.group(1)
+          and f'registryKey: "{public_key.group(1)}"' in app_config,
+          "the public registry key: the contract, config.py and the app pin the same one, not the testnet one")
 
     kp = Keypair.random()
     sig = registry.sign_bytes(data, kp)
@@ -721,18 +738,21 @@ def test_registry_check(tmp: Path) -> None:
         logging.getLogger("ficha.registry").removeHandler(grab)
 
     pub = load_env(STELLAR_NETWORK="public", MOCK="false", MOCK_PAYMENT="false", ADB_SERIAL=ADB_SERIAL,
-                   STATION_ID="K7M2QX", REGISTRY_KEY=PUBLIC_REGISTRY_KEY)
+                   STATION_ID="K7M2QX", REGISTRY_KEY="")
+    # The repo's own stations.public.json does not list K7M2QX: read a copy that is not there.
     check(pub.registry_url == "https://ficha-stellar.vercel.app/registry/stations.public.json"
-          and pub.registry_file == root / "registry" / "stations.public.json" and config.REGISTRY_KEYS["public"] == ""
-          and pub.registry_key == PUBLIC_REGISTRY_KEY
-          and registry_check.check(pub, offline) == {"status": "unchecked", "detail": "no copy found"},
-          "public: stations.public.json, no key pinned yet (REGISTRY_KEY gives it), no copy here: unchecked")
-    try:
-        load_env(STELLAR_NETWORK="public", MOCK="false", MOCK_PAYMENT="false", ADB_SERIAL=ADB_SERIAL,
-                 STATION_ID="K7M2QX")
-        check(False, "public with no key pinned and no REGISTRY_KEY: refused")
-    except config.ConfigError as exc:
-        check("needs REGISTRY_KEY" in str(exc), "public with no key pinned and no REGISTRY_KEY: refused")
+          and pub.registry_file == root / "registry" / "stations.public.json"
+          and pub.registry_key == config.REGISTRY_KEYS["public"] == PUBLIC_REGISTRY_KEY != ""
+          and registry_check.check(replace(pub, registry_file=tmp / "missing.public.json"), offline)
+          == {"status": "unchecked", "detail": "no copy found"},
+          "public: stations.public.json, the pinned public key (REGISTRY_KEY empty), no copy readable: unchecked")
+    with pinned_public(""):
+        try:
+            load_env(STELLAR_NETWORK="public", MOCK="false", MOCK_PAYMENT="false", ADB_SERIAL=ADB_SERIAL,
+                     STATION_ID="K7M2QX", REGISTRY_KEY="")
+            check(False, "public, a version that pins no key and no REGISTRY_KEY: refused")
+        except config.ConfigError as exc:
+            check("needs REGISTRY_KEY" in str(exc), "public, a version that pins no key and no REGISTRY_KEY: refused")
     secret = Keypair.random().secret
     try:
         load_env(REGISTRY_KEY=secret)
@@ -754,12 +774,13 @@ def test_public(tmp: Path) -> None:
     r = Rig(tmp)
     env = {"STELLAR_NETWORK": "public", "MOCK": "false", "MOCK_PAYMENT": "false", "ADB_SERIAL": ADB_SERIAL,
            "HOST_PUBLIC_KEY": Keypair.random().public_key, "PAYMENT_ASSET_CODE": "XLM", "STATION_ID": "K7M2QX",
-           "REGISTRY_KEY": PUBLIC_REGISTRY_KEY}
+           "REGISTRY_KEY": ""}
     pub = load_env(**env)
     check(pub.network == "public" and pub.horizon_url == "https://horizon.stellar.org" and pub.is_native
           and pub.payment_mode == "direct" and not pub.mock and not pub.mock_payment and pub.registry_check
           and pub.host_public_key == env["HOST_PUBLIC_KEY"] and pub.registry_key == PUBLIC_REGISTRY_KEY,
-          "a correct public config validates: direct, a real relay and phone, native XLM, STATION_ID, REGISTRY_KEY")
+          "a correct public config validates: direct, a real relay and phone, native XLM, STATION_ID, the pinned "
+          "registry key")
 
     demo_hosts = {s["host_key"] for s in json.loads((root / "registry" / "stations.json").read_bytes())["stations"]}
     testnet_registry = config.REGISTRY_KEYS["testnet"]
@@ -768,7 +789,6 @@ def test_public(tmp: Path) -> None:
         ("MOCK_PAYMENT=true", {"mock_payment": True}, "MOCK_PAYMENT=true on the public network"),
         ("REGISTRY_CHECK=false", {"registry_check": False}, "REGISTRY_CHECK=false on the public network"),
         ("no STATION_ID", {"station_id": ""}, "STELLAR_NETWORK=public needs STATION_ID"),
-        ("no registry key", {"registry_key": ""}, "STELLAR_NETWORK=public needs REGISTRY_KEY"),
         ("the testnet registry key as REGISTRY_KEY", {"registry_key": testnet_registry}, "the testnet registry's key"),
         ("the testnet registry key as HOST_PUBLIC_KEY", {"host_public_key": testnet_registry},
          "the testnet registry's key"),
@@ -778,9 +798,7 @@ def test_public(tmp: Path) -> None:
           for h in demo_hosts),
     ):
         refused(on_public(r.cfg, **over), f"public: {what}", says)
-    refused(on_public(r.cfg, registry_key=testnet_registry), "public: the testnet registry key, none pinned",
-            "Put that key (none is pinned for public yet).")
-    check(bool(demo_hosts), "public refuses MOCK, MOCK_PAYMENT, REGISTRY_CHECK=false, no STATION_ID, no registry key, and the "
+    check(bool(demo_hosts), "public refuses MOCK, MOCK_PAYMENT, REGISTRY_CHECK=false, no STATION_ID, and the "
           "testnet demo's host and registry keys as either key, each saying so")
     config.validate(replace(r.cfg, station_id="", registry_check=False, registry_key=testnet_registry,
                             host_public_key=next(iter(demo_hosts))))
@@ -795,18 +813,30 @@ def test_public(tmp: Path) -> None:
             check(secret not in str(exc) and "SECRET" in str(exc),
                   f"public: {name} holding a secret refused without echoing it")
 
-    pinned = Keypair.random().public_key
-    config.REGISTRY_KEYS["public"] = pinned
+    pinned, other = config.REGISTRY_KEYS["public"], Keypair.random().public_key
+    refused(on_public(r.cfg, registry_key=other), "public: a REGISTRY_KEY other than the pinned one",
+            f"REGISTRY_KEY={other} is not the public registry key this version pins ({pinned})")
+    refused(on_public(r.cfg, registry_key=testnet_registry), "public: the testnet registry key, one pinned",
+            "leave REGISTRY_KEY empty for the pinned one")
+    config.validate(on_public(r.cfg, registry_key=pinned))
     try:
-        refused(on_public(r.cfg), "public: a REGISTRY_KEY other than the pinned one", f"this version pins ({pinned})")
-        refused(on_public(r.cfg, registry_key=testnet_registry), "public: the testnet registry key, one pinned",
-                "leave REGISTRY_KEY empty for the pinned one")
-        config.validate(on_public(r.cfg, registry_key=pinned))
-        check(load_env(**{k: v for k, v in env.items() if k != "REGISTRY_KEY"}).registry_key == pinned,
-              "once a public key is pinned: an empty REGISTRY_KEY takes it, another one is refused, and the "
-              "testnet one's refusal offers the pinned one")
-    finally:
-        config.REGISTRY_KEYS["public"] = ""
+        load_env(**dict(env, REGISTRY_KEY=other))
+        from_env = ""
+    except config.ConfigError as exc:
+        from_env = str(exc)
+    check(pinned == "GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG"
+          and load_env(**env).registry_key == pinned and f"this version pins ({pinned})" in from_env,
+          "the public key pinned: an empty REGISTRY_KEY takes it, another one in .env is refused, and the testnet "
+          "one's refusal offers the pinned one")
+    with pinned_public(""):
+        refused(on_public(r.cfg, registry_key=""), "public, a version that pins no key: no registry key",
+                "STELLAR_NETWORK=public needs REGISTRY_KEY")
+        refused(on_public(r.cfg, registry_key=testnet_registry), "public, a version that pins no key: the testnet "
+                "registry key", "Put that key (this version pins none for public).")
+        config.validate(on_public(r.cfg, registry_key=other))
+        check(load_env(**dict(env, REGISTRY_KEY=other)).registry_key == other,
+              "a version that pins no public key: an empty REGISTRY_KEY refused, another one taken, and the testnet "
+              "one's refusal says none is pinned")
 
     def offline(url: str):
         raise registry_check.Unavailable("ConnectError")
@@ -1014,7 +1044,8 @@ def test_public_rechecks(tmp: Path) -> None:
     r = Rig(tmp)
     pub = on_public(r.cfg, registry_key=kp.public_key, registry_file=tmp / "missing.json",
                     registry_url=config.REGISTRY_SITE + config.REGISTRY_FILES["public"])
-    config.validate(pub)
+    with pinned_public(kp.public_key):
+        config.validate(pub)
     testnet = replace(r.cfg, station_id="K7M2QX", registry_key=kp.public_key, registry_file=tmp / "missing.json")
     fetched: list[str] = []
     try:

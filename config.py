@@ -54,9 +54,11 @@ DEFAULT_ASSETS = {
 # a station offline can still check. One file per network.
 REGISTRY_SITE = "https://ficha-stellar.vercel.app/registry/"
 REGISTRY_FILES = {"testnet": "stations.json", "public": "stations.public.json"}
-# The registry public key the app pins. None yet for public: that registry is
-# not published, so a public station needs REGISTRY_KEY set (validate_public).
-REGISTRY_KEYS = {"testnet": "GBC2MDBTM4MX3XJKRX5QM3YXUR2AISCOJGJ74MXLPIZHZDIDHOLFAASA", "public": ""}
+# The registry public key the app pins, one per network (the contract's
+# section 2 lists both). An empty REGISTRY_KEY takes it; on public, any other
+# key is refused (validate_public).
+REGISTRY_KEYS = {"testnet": "GBC2MDBTM4MX3XJKRX5QM3YXUR2AISCOJGJ74MXLPIZHZDIDHOLFAASA",
+                 "public": "GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG"}
 # The testnet demo's keys (registry/stations.json, the .env examples). The
 # same key is a valid account on the public network: a .env copied from a
 # demo would send real money to the demo's host, or check a public registry
@@ -790,14 +792,16 @@ def validate_public(cfg: Config) -> None:
                           "entry at startup. Use its ID in registry/stations.public.json.")
     rkey, pinned = cfg.registry_key, REGISTRY_KEYS["public"]
     if not rkey:
+        # Only in a version that pins no public key: load() gives an empty
+        # REGISTRY_KEY the pinned one.
         raise ConfigError("STELLAR_NETWORK=public needs REGISTRY_KEY, the public registry's PUBLIC key (starts "
-                          "with G): this version pins none for public yet, and the station does not start on a "
+                          "with G): this version pins none for public, and the station does not start on a "
                           "registry it cannot verify.")
     for name, value, why in (("HOST_PUBLIC_KEY", cfg.host_public_key, "real payments would go to the demo's "
                               "account. Put the mainnet public key of this station's host"),
                              ("REGISTRY_KEY", rkey, "the public registry is signed with its own key. Put that "
                               + ("key, or leave REGISTRY_KEY empty for the pinned one" if pinned else
-                                 "key (none is pinned for public yet)"))):
+                                 "key (this version pins none for public)"))):
         if value in TESTNET_DEMO_KEYS:
             raise ConfigError(f"{name}={value} is {TESTNET_DEMO_KEYS[value]}, from the testnet demo: on the "
                               f"public network {why}.")

@@ -104,12 +104,11 @@ export const NETWORKS: Record<NetworkId, NetworkConfig> = {
     friendbotUrl: null,
     explorerSegment: "public",
     usdc: { code: "USDC", issuer: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" },
-    // Not published yet (contract §2: stations.public.json later).
-    liveRegistryUrl: null,
+    liveRegistryUrl: `${SITE_URL}registry/stations.public.json`,
     registryUrl: `${import.meta.env.BASE_URL}registry/stations.public.json`,
     registrySigUrl: `${import.meta.env.BASE_URL}registry/stations.public.json.sig`,
-    // Not pinned yet: the public registry is not published. Keep null until it is.
-    registryKey: null,
+    // The public registry's own key (contract §2), never the testnet one.
+    registryKey: "GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG",
     anchorDomain: null,
     receiptNet: "p",
     // Direct payments only until the contract is audited (contract §7).

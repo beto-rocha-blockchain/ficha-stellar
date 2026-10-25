@@ -64,7 +64,7 @@ signature in `registry/stations.json.sig`.
 ```
 
 - `network` is `testnet` or `public`; one registry file per network
-  (`stations.json` = testnet for now; `stations.public.json` later).
+  (`stations.json` = testnet; `stations.public.json` = public).
 - `ficha_price` is a decimal string in the asset, above zero: digits,
   optionally a dot and 1 to 7 decimals (`"1"`, `"0.25"`; not `".5"`, `"1."`
   or `"1e1"`). `asset.issuer` is required; null = native XLM. The app drops
@@ -119,17 +119,19 @@ signature in `registry/stations.json.sig`.
   lives in the repo, on a station, or in the app; `tools/registry.py` signs on
   the operator's machine from a key file or the `REGISTRY_SECRET` variable.
 - Registry key (testnet): GBC2MDBTM4MX3XJKRX5QM3YXUR2AISCOJGJ74MXLPIZHZDIDHOLFAASA
+- Registry key (public): GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG
 - Check a registry from the repo root:
   `python tools/registry.py verify --key <the pinned key>`.
 - `registry/` is marked `-text` in `.gitattributes`: git must not rewrite its
   line endings, or the bytes would no longer match the signature.
 - Published with the Ficha site (section 6) at
-  `https://ficha-stellar.vercel.app/registry/stations.json` (+ `.sig`),
-  byte for byte as committed, with `Access-Control-Allow-Origin: *` and
+  `https://ficha-stellar.vercel.app/registry/stations.json` (+ `.sig`), and
+  the public one at `…/registry/stations.public.json` (+ `.sig`), byte for
+  byte as committed, with `Access-Control-Allow-Origin: *` and
   `Cache-Control: no-cache`, so a new signature is seen at once.
 - The app fetches that published copy first (`liveRegistryUrl` in
-  `app/src/config.ts`; none yet for the public network) and verifies it with
-  the pinned key. When the site cannot be reached it uses the copy bundled in
+  `app/src/config.ts`, one per network) and verifies it with the network's
+  pinned key. When the site cannot be reached it uses the copy bundled in
   its build, or the last verified published copy kept on the phone. A copy
   that fails verification is never used, and of the verified copies it holds
   the newest `issued_at` wins, so a replayed older registry does not come
@@ -137,7 +139,8 @@ signature in `registry/stations.json.sig`.
 - The station checks itself against it at startup when `STATION_ID` is set
   (`registry_check.py`): the published copy first (`REGISTRY_URL`, short
   timeout), then the repo copy (`REGISTRY_FILE`), signature verified with the
-  pinned public key (`REGISTRY_KEY`, default the testnet key above). Its
+  pinned public key (`REGISTRY_KEY`, default the network's key above; on the
+  public network no other key is accepted). Its
   entry must be `active` and match the station's `STELLAR_NETWORK` (the
   registry's `network`), `HOST_PUBLIC_KEY` (`host_key`), asset (`asset`),
   `FICHA_PRICE` (`ficha_price`, compared as a number), `FICHA_MINUTES` and

@@ -111,11 +111,11 @@ loopback `HOST` or without `WIFI_SSID`).
 
 On the public network (section 4) it also refuses `MOCK=true`,
 `MOCK_PAYMENT=true`, `CHARGE_VERIFY=false`, `PAYMENT_MODE=custody`,
-`REGISTRY_CHECK=false`, an empty `STATION_ID`, no registry key (none is
-pinned for public yet: set `REGISTRY_KEY`), a `REGISTRY_KEY` other than the
-pinned public key once there is one, the testnet demo's host or registry key
-as `HOST_PUBLIC_KEY` or `REGISTRY_KEY`, and a registry that could not be
-checked at startup (anything but `registry ok`, even offline).
+`REGISTRY_CHECK=false`, an empty `STATION_ID`, a `REGISTRY_KEY` other than
+the pinned public registry key (leave it empty to use that one), the testnet
+demo's host or registry key as `HOST_PUBLIC_KEY` or `REGISTRY_KEY`, and a
+registry that could not be checked at startup (anything but `registry ok`,
+even offline).
 
 To receive real **testnet** payments, set `HOST_PUBLIC_KEY` to a testnet
 account you control (create and fund one in Stellar Laboratory) and pay the
@@ -313,9 +313,8 @@ rules: [free-minutes.md](free-minutes.md).
    and price) in `registry/stations.public.json`, sign it and verify it with
    the pinned public registry key (section 5). The app blocks payment to a
    station it cannot find there, or whose host key differs, and on Mainnet
-   to any QR without a station code. Set
-   `REGISTRY_KEY` to that key: none is pinned for public yet, and the station
-   refuses to start without it (once one is pinned, any other is refused).
+   to any QR without a station code. Leave `REGISTRY_KEY` empty: the station
+   then uses the pinned public key, and refuses to start with any other.
    On public the station also refuses to start without `STATION_ID`, with
    `REGISTRY_CHECK=false`, and unless the startup check says `registry ok`:
    with no copy of the registry readable (offline and no
@@ -481,7 +480,8 @@ reads the registry at startup: first the copy published with the site
 (`REGISTRY_URL`, default
 `https://ficha-stellar.vercel.app/registry/stations.json`, 3 s timeout), then the copy in the repo (`REGISTRY_FILE`, default
 `registry/stations.json`), and verifies its signature with the pinned public
-key (`REGISTRY_KEY`, default the testnet key; the station holds no secret).
+key (`REGISTRY_KEY`, default the network's pinned key; the station holds no
+secret).
 Its entry must be active and match `.env`: network, `HOST_PUBLIC_KEY`, asset,
 `FICHA_PRICE` (as a number: `1.0` matches `"1"`), `FICHA_MINUTES`,
 `MAX_SESSION_MINUTES` and the payment mode (`PAYMENT_MODE`, and the custody

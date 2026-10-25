@@ -464,10 +464,10 @@ before any claim of eligibility:
 - **Direct mode runs on the public network today.** With
   `STELLAR_NETWORK=public` the station shows a SEP-7 QR that any Stellar
   wallet pays, straight to the venue's account (USDC by default), and
-  refuses custody. Before the first mainnet station, a registry key is to
-  be pinned for the public network and the station listed under it: none
-  is pinned yet, and the app warns before paying a station it cannot find
-  in a signed registry
+  refuses custody. The public registry's key is pinned (station and app),
+  so a mainnet station starts only once it is listed in a
+  `stations.public.json` signed with it, and the app warns before paying a
+  station it cannot find in a signed registry
   ([operators guide, section 4](docs/operators.md#4-switching-testnet--public)).
   The recorded runs are all on testnet.
 - **For the public's phones, in either mode: the outlet meter.** The ADB
