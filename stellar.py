@@ -7,7 +7,9 @@ The first run without a cursor starts at the newest payment made before the
 station started: history is never replayed, and nothing paid after the start
 is skipped, even if Horizon could not be reached at first. On testnet, a
 cursor far past the network's latest ledger (saved before a testnet reset,
-when the ledger started over) is dropped the same way.
+when the ledger started over) is dropped the same way. Before any of it,
+Horizon's root must say it serves STELLAR_NETWORK's network: until it does,
+nothing is read and every poll fails.
 
 The station only ever knows the host's PUBLIC key. Nothing here signs.
 """
@@ -23,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
@@ -145,6 +147,15 @@ def _created_at(rec: dict) -> datetime | None:
     return created if created.tzinfo else created.replace(tzinfo=timezone.utc)
 
 
+class WrongNetwork(Exception):
+    """Horizon serves another network than STELLAR_NETWORK: the full message
+    for the console, `short` for the footer."""
+
+    def __init__(self, message: str, short: str) -> None:
+        super().__init__(message)
+        self.short = short
+
+
 class HorizonWatcher:
     PAGE = 200
 
@@ -169,6 +180,7 @@ class HorizonWatcher:
         self.cursor: str | None = None
         self.cursor_error: str | None = None
         self.reset_checked_at: float | None = None  # monotonic
+        self.network_checked = False  # Horizon's root said STELLAR_NETWORK's passphrase
 
     # -- health, for the footer ------------------------------------------
     def health(self) -> dict:
@@ -212,6 +224,35 @@ class HorizonWatcher:
     @property
     def _payments_url(self) -> str:
         return f"{self.cfg.horizon_url}/accounts/{self.cfg.host_public_key}/payments"
+
+    async def _check_network(self, client: httpx.AsyncClient) -> None:
+        """Horizon's root must say it serves STELLAR_NETWORK's network (its
+        network_passphrase), the one the pay QR asks for. A Horizon on another
+        network (futurenet, a local quickstart, a testnet one on a public
+        station) never sees a payment made from the QR, and would credit one
+        made there, with free coins, under the session's memo. Raises
+        WrongNetwork until it says so: no cursor is saved, nothing is
+        credited, and on the public network the pay QR stays hidden
+        (Station.out_of_service()). Asked once per run, before anything else."""
+        resp = await client.get(f"{self.cfg.horizon_url}/")
+        resp.raise_for_status()
+        try:
+            root = resp.json()
+        except ValueError:
+            root = None
+        said = root.get("network_passphrase") if isinstance(root, dict) else None
+        wanted = NETWORK_PASSPHRASES[self.cfg.network]
+        host = urlsplit(self.cfg.horizon_url).hostname or "HORIZON_URL"
+        if said != wanted:
+            what = f"says it serves {said!r}" if isinstance(said, str) else "does not say which network it serves"
+            raise WrongNetwork(
+                f"the Horizon at {host} {what}, and STELLAR_NETWORK={self.cfg.network} needs {wanted!r}: no "
+                f"payment is read from it until it says so. Point HORIZON_URL at a {self.cfg.network} Horizon, "
+                "or leave it empty for SDF's.",
+                f"not the {self.cfg.network} network",
+            )
+        self.network_checked = True
+        log.info("horizon at %s serves %r, the %s network", host, said, self.cfg.network)
 
     async def _init_cursor(self, client: httpx.AsyncClient) -> None:
         """No cursor yet: start at the newest payment made at or before the
@@ -267,6 +308,9 @@ class HorizonWatcher:
         )
 
     async def poll_once(self, client: httpx.AsyncClient) -> None:
+        if not self.network_checked:
+            # Before the cursor too: a first run saves one from what it reads.
+            await self._check_network(client)
         if self.cursor is None:
             self.cursor = self._load_cursor()
         if self.cursor is None:
@@ -333,6 +377,8 @@ class HorizonWatcher:
                 self._set("ok")
         except asyncio.CancelledError:
             raise
+        except WrongNetwork as exc:
+            self._set("error", exc.short, full=str(exc))
         except httpx.HTTPStatusError as exc:
             # httpx says it in two lines with the whole request URL, far too
             # long for the footer: it would push the price off the screen.

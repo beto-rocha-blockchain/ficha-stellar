@@ -4,7 +4,8 @@ Covers: payment, courtesy, extension, underpaid, orphan, session cap, ESC,
 verdicts, cut confirmation, both topologies, restart after a crash, the
 offered network QR, station IDs and memos, the signed registry and the
 station's startup check against it, the public network's refusals (only a
-real station, checked against the registry, starts there), the receipt QR, change and refund hints, payments in another asset, the robustness fixes
+real station, checked against the registry, starts there), a Horizon on
+another network, the receipt QR, change and refund hints, payments in another asset, the robustness fixes
 (cursor, log, relay out of service, held readings, transitions, notices,
 config checks), main.py's screens socket (a client that stops reading,
 other origins) and /debug/pay, and custody mode: the hash chain against the
@@ -902,6 +903,81 @@ def test_horizon_public(tmp: Path) -> None:
           "main.py: Horizon's reads reach the station (on testnet, the pay QR stays)")
 
 
+def test_horizon_network(tmp: Path) -> None:
+    print("Horizon: payments are read only from one that says it serves the station's network")
+    started = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
+    public = config.NETWORK_PASSPHRASES["public"]
+    warnings: list[str] = []
+
+    class Grab(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.levelno >= logging.WARNING:
+                warnings.append(record.getMessage())
+
+    def rig(name: str, public_net: bool = True) -> tuple[Rig, HorizonWatcher, list[dict]]:
+        (tmp / name).mkdir()
+        r = Rig(tmp / name, cursor_dir=tmp / name)
+        if public_net:
+            r.cfg = on_public(r.cfg)
+            r.st = r.station(r.relay, r.log)
+        r.st.watch_horizon()
+        w = HorizonWatcher(r.cfg, r.st.on_payment, now=lambda: started, on_read=r.st.on_horizon)
+        return r, w, [horizon_payment("100", "2026-09-29T10:00:00Z"),
+                      horizon_payment("200", "2026-09-29T12:00:30Z", r.st.session.id)]
+
+    def credited(r: Rig) -> bool:
+        return any(x["kind"] == "credited" for x in r.records())
+
+    grab = Grab()
+    logging.getLogger("ficha.stellar").addHandler(grab)
+    try:
+        for name, root, said in (("futurenet", {"network_passphrase": Network.FUTURENET_NETWORK_PASSPHRASE},
+                                  f"says it serves {Network.FUTURENET_NETWORK_PASSPHRASE!r}"),
+                                 ("testnet", {"network_passphrase": Network.TESTNET_NETWORK_PASSPHRASE},
+                                  f"says it serves {Network.TESTNET_NETWORK_PASSPHRASE!r}"),
+                                 ("no network", {}, "does not say which network it serves")):
+            r, w, records = rig(name)
+            warnings.clear()
+            for _ in range(3):
+                poll(w, records, root)
+                r.clock.t += 2
+            check(r.st.out_of_service() == "horizon: not read yet" and r.st.horizon_read_at is None
+                  and w.health() == {"status": "error", "detail": "not the public network"}
+                  and r.st.state == State.AWAITING_PAYMENT and not credited(r) and w.cursor is None
+                  and not r.cfg.cursor_file.exists(),
+                  f"public, a Horizon whose root says {name}: out of service (no pay QR), a payment there with the "
+                  "session's memo never credited, no cursor saved")
+            check(len(warnings) == 1 and f"{said}, and STELLAR_NETWORK=public needs {public!r}" in warnings[0],
+                  f"... one warning, naming what it serves and the public passphrase ({name})")
+        poll(w, records)
+        check(w.network_checked and w.health()["status"] == "ok" and r.st.out_of_service() is None
+              and r.st.state == State.CHARGING and credited(r) and w.cursor == "200",
+              "public, a Horizon whose root says the public network: in service, its payments credited")
+
+        r, w, records = rig("testnet-sdf", public_net=False)
+        poll(w, records)
+        check(w.health()["status"] == "ok" and r.st.state == State.CHARGING and credited(r),
+              f"testnet unchanged: SDF's testnet Horizon says {Network.TESTNET_NETWORK_PASSPHRASE!r}, payments "
+              "credited")
+        r, w, records = rig("testnet-other", public_net=False)
+        poll(w, records, {"network_passphrase": public})
+        r.clock.t += 600
+        check(w.health() == {"status": "error", "detail": "not the testnet network"} and not credited(r)
+              and r.st.out_of_service() is None,
+              "testnet, a Horizon on another network: not read, the footer says so, the pay QR stays (as for any "
+              "Horizon failing on testnet)")
+    finally:
+        logging.getLogger("ficha.stellar").removeHandler(grab)
+
+    r = Rig(tmp)
+    for url in ("http://horizon.stellar.org", "http://localhost:8000", "horizon.stellar.org"):
+        refused(on_public(r.cfg, horizon_url=url), f"public, HORIZON_URL={url}", "use an https:// Horizon")
+    config.validate(on_public(r.cfg, horizon_url="https://horizon.example-node.test"))
+    config.validate(replace(r.cfg, horizon_url="http://localhost:8000"))
+    check(True, "public: a HORIZON_URL that is not https refused (another https one validates; testnet still "
+                "takes http://localhost:8000)")
+
+
 def test_receipt(tmp: Path) -> None:
     print("receipt")
     r = Rig(tmp, station_id="K7M2QX", app_url="https://ficha.test")
@@ -980,9 +1056,17 @@ def test_money(tmp: Path) -> None:
           "(14) the screen hides the pay QR and the price note at the session limit")
 
 
-def horizon_mock(records: list[dict]) -> httpx.MockTransport:
-    """A Horizon that pages /payments by paging_token, both orders."""
+# The network each of SDF's Horizons says it serves, at its root.
+SDF_HORIZONS = {urlsplit(url).hostname: config.NETWORK_PASSPHRASES[net] for net, url in config.HORIZON_URLS.items()}
+
+
+def horizon_mock(records: list[dict], root: dict | None = None) -> httpx.MockTransport:
+    """A Horizon that pages /payments by paging_token, both orders. Its root
+    answers root, by default as SDF's Horizon at that address does."""
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/":
+            return httpx.Response(200, json=root if root is not None
+                                  else {"network_passphrase": SDF_HORIZONS.get(request.url.host)})
         q = request.url.params
         cursor = int(q.get("cursor") or 0)
         if q.get("order") == "desc":
@@ -1000,9 +1084,9 @@ def horizon_payment(token: str, created: str, memo: str | None = None) -> dict:
             "transaction": {"memo_type": "text", "memo": memo} if memo else {"memo_type": "none"}}
 
 
-def poll(watcher: HorizonWatcher, records: list[dict]) -> None:
+def poll(watcher: HorizonWatcher, records: list[dict], root: dict | None = None) -> None:
     async def run():
-        async with httpx.AsyncClient(transport=horizon_mock(records)) as client:
+        async with httpx.AsyncClient(transport=horizon_mock(records, root)) as client:
             await watcher.poll(client)
     asyncio.run(run())
 
@@ -3425,7 +3509,8 @@ def test_ledger_reset(tmp: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/":
             roots.append(latest)
-            return httpx.Response(200, json={"history_latest_ledger": latest})
+            return httpx.Response(200, json={"history_latest_ledger": latest,
+                                             "network_passphrase": Network.TESTNET_NETWORK_PASSPHRASE})
         return inner.handle_request(request)
 
     def run(w: HorizonWatcher) -> None:
@@ -3436,17 +3521,18 @@ def test_ledger_reset(tmp: Path) -> None:
 
     w = HorizonWatcher(r.cfg, r.st.on_payment, now=lambda: started)
     run(w)
-    check(len(roots) == 1 and w.cursor == tokens[1] and r.cfg.cursor_file.read_text() == tokens[1]
+    # The root is read once per run for the network, then for the reset.
+    check(len(roots) == 2 and w.cursor == tokens[1] and r.cfg.cursor_file.read_text() == tokens[1]
           and r.st.state == State.CHARGING and r.records()[-1]["tx_hash"] == "h" + tokens[1],
           "a cursor in ledger 5 000 000, the network's latest 50 000 (reset): it starts over, and the payment "
           "made after the reset is credited")
     run(w)
-    check(len(roots) == 1 and w.health()["status"] == "ok", "checked at most once a minute")
+    check(len(roots) == 2 and w.health()["status"] == "ok", "checked at most once a minute")
     near = str((50_500 << 32) | 4096)
     r.cfg.cursor_file.write_text(near)
     w2 = HorizonWatcher(r.cfg, r.st.on_payment, now=lambda: started)
     run(w2)
-    check(len(roots) == 2 and w2.cursor == near, "a cursor a few hundred ledgers ahead (a lagging server): kept")
+    check(len(roots) == 4 and w2.cursor == near, "a cursor a few hundred ledgers ahead (a lagging server): kept")
 
 
 def test_registry_rules(tmp: Path) -> None:
@@ -4414,6 +4500,7 @@ if __name__ == "__main__":
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
              ("i", test_money), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
              ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
+             ("m4", test_horizon_network),
              ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
              ("q", test_custody_restart), ("r", test_escrow_watch), ("r2", test_escrow_rpc30),
              ("s", test_custody_screens),

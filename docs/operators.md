@@ -95,8 +95,9 @@ The station refuses to start on a configuration that cannot work or is unsafe,
 and says what to change. Besides the topology and network combinations:
 `MOCK_PAYMENT=true` with a `HOST` other than loopback (anyone on the network
 could make free payments), a `HORIZON_URL` that is the other network's
-Horizon, a `FICHA_PRICE` that is not a positive number with at most 7
-decimals, `MIN_CURRENT_MA` below 1, `HORIZON_POLL_SECONDS` below 0.5, a
+Horizon (or, on public, one that is not https), a `FICHA_PRICE` that is not
+a positive number with at most 7 decimals, `MIN_CURRENT_MA` below 1,
+`HORIZON_POLL_SECONDS` below 0.5, a
 `CURSOR_DIR` that does not exist or cannot be written, a `SESSION_LOG` that
 cannot be written (or whose directory does not exist), a malformed
 `STATION_ID`, an `APP_URL` or `REGISTRY_URL` that is not https, a secret key
@@ -291,7 +292,10 @@ rules: [free-minutes.md](free-minutes.md).
 ## 4. Switching testnet → public
 
 1. `STELLAR_NETWORK=public` (Horizon URL follows; `HORIZON_URL` only overrides,
-   and the testnet Horizon is refused on public).
+   must be https, and the testnet Horizon is refused on public). On any
+   network, payments are read only once Horizon's root says it serves that
+   network (its `network_passphrase`); until then the footer says
+   `horizon error · not the public network` and, on public, no pay QR shows.
 2. `HOST_PUBLIC_KEY` = the host's **mainnet** public key (G…). Never a secret.
 3. Asset: empty `PAYMENT_ASSET_CODE` means USDC from Circle's issuer
    `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`. **Confirm the

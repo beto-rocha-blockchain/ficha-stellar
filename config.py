@@ -502,10 +502,19 @@ def validate(cfg: Config) -> None:
         )
 
     other = "public" if cfg.network == "testnet" else "testnet"
-    if urlsplit(cfg.horizon_url).hostname == urlsplit(HORIZON_URLS[other]).hostname:
+    horizon = urlsplit(cfg.horizon_url)
+    if horizon.hostname == urlsplit(HORIZON_URLS[other]).hostname:
         raise ConfigError(
             f"HORIZON_URL={cfg.horizon_url} is the {other} Horizon, but "
             f"STELLAR_NETWORK={cfg.network}. Empty HORIZON_URL follows the network."
+        )
+    if cfg.network == "public" and (horizon.scheme != "https" or not horizon.hostname):
+        # Whoever answers for Horizon decides which payments the station
+        # credits; its root must also say it serves the public network
+        # (stellar.HorizonWatcher).
+        raise ConfigError(
+            f"HORIZON_URL={cfg.horizon_url} on the public network: use an https:// Horizon (over http, anyone "
+            "on the way could answer for it with payments nobody made), or leave it empty for SDF's."
         )
     if not math.isfinite(cfg.horizon_poll_seconds) or cfg.horizon_poll_seconds < 0.5:
         raise ConfigError("HORIZON_POLL_SECONDS must be at least 0.5")
