@@ -340,28 +340,59 @@ footer.
 ### Refunds by hand (direct mode)
 
 A direct-mode station cannot refund: it holds no key. The host refunds from
-its own wallet, with real money on public, so:
+its own wallet, with real money on public. The station works out what is
+due, shows it on its screen and sees it paid; the host signs:
 
-1. **What is due** comes from `sessions.jsonl` only: a session record's
-   `refund_hint` (`change` + `capped` + `unused`), and the whole amount of
-   every `orphan`, `refused` and `underpaid` line. `dust` lines are never
-   refunded (section 5). An `interrupted` session has only `change`: the
-   rest is unknown, and the host decides.
-2. **Who gets it** is the `payer` written in that line; for a session, each
-   payment's own `credited` line. When several wallets paid one session,
-   each gets its own change, and the capped and unused part is split by what
-   each paid.
-3. **Copy the destination from the log line itself**, never from a wallet's
+1. **What is due** comes from `sessions.jsonl` only. A paid session's line
+   carries `refunds`, one per payer: its own change (its `credited` lines'
+   `change_due`) plus its share of the capped and unused time
+   (`refund_hint`), split by what each payer credited, each rounded down to
+   the stroop so together they never exceed what is due. An `interrupted`
+   session has each payer's change only: the rest is unknown, and the host
+   decides. Each `orphan`, `refused` and `underpaid` line carries one for
+   its whole amount, to its own payer, in the asset it came in. `dust`
+   lines never do (section 5), and neither does a debug payment's made-up
+   payer. Lines logged before the station had `refunds` are not filled in:
+   refund those from `refund_hint` and the uncredited lines, as before.
+2. **The screen shows them.** While the station waits for a payment, an
+   operator card **Refund due** sits where the tiles are, never over the
+   pay QR: the newest refund still due, with its amount, the payer's first
+   and last 6 characters, its ref and, when several are due, how many. It
+   is dashed and says "not a pay QR"; it does not show while a session is
+   being served (charging, the FINISHED screen). The host pays it either
+   way:
+   - **Freighter mobile** (or another SEP-7 wallet holding the host
+     account): scan the card's QR, check the amount and the address, sign.
+   - **Freighter on this laptop**: **Refund with Freighter** (with
+     `APP_URL` set) opens the Ficha site's `/refund` page in a new tab. It
+     checks the refund against the signed registry (the ref's station and
+     its host key) and asks the Freighter extension to sign it as the host
+     account.
+3. **The station marks it refunded** when Horizon shows a payment from the
+   host with memo `refund <REF>`, to that refund's payer and in its asset:
+   a `refunded` line in the log, a notice on screen, and the card moves on
+   to the next refund due. Less than due leaves the rest due (the card then
+   asks for what is left); more than due clears it, and the line says the
+   `excess`. Any other payment the host sends is its own business and is
+   ignored; none ever credits a session. What is still due survives a
+   restart: it is rebuilt from the log.
+4. **The destination always comes from the log**, never from a wallet's
    history or its "recent" addresses: a look-alike address (same first and
-   last characters) may have sent the host a tiny payment exactly so that it
-   is copied by mistake. Before signing, compare the whole address with the
-   log line, at least its first and last 6 characters.
-4. Memo `refund <SESSION>` (a text memo; `refund YX3DGE.F3MF95D8` fits in
-   28 bytes). A payer who paid from an exchange's shared account needs the
-   exchange's own memo: ask, or the refund is lost.
-5. If the wallet says the outcome is unknown, never send it again until the
-   host's history shows whether it landed.
-6. Keep a copy of `sessions.jsonl` outside any temporary folder. After an
+   last characters) may have sent the host a tiny payment exactly so that
+   it is copied by mistake. The card's QR and button carry the `payer` of
+   the log line. Refunding by hand, copy it from the log line itself and,
+   before signing, compare the whole address with it, at least its first
+   and last 6 characters.
+5. Memo `refund <REF>` (a text memo): the session ID for a session's
+   refund (`refund 8DY7RJ.FAFXJXBZ`, 22 of the 28 bytes), and for a payment
+   whose memo names none of this station's sessions
+   `<STATION_ID>.tx<first 8 hex of its transaction hash>`. A payer who paid
+   from an exchange's shared account needs the exchange's own memo: ask, or
+   the refund is lost. Paid with that memo, the station cannot tell it is
+   the refund, and the card keeps showing it.
+6. If the wallet says the outcome is unknown, never send it again until the
+   host's history shows whether it landed (or the card moves on).
+7. Keep a copy of `sessions.jsonl` outside any temporary folder. After an
    event, list every payment the host received (stellar.expert or Horizon)
    and match each to a log line: a payment made while the station was off,
    or before its first start, is in no log.
@@ -383,7 +414,8 @@ its own wallet, with real money on public, so:
   logged for a manual refund.
 - **Fichas die with the session.** They do not transfer, redeem or carry over.
 - **Refunds are manual, from the log** (direct mode; custody mode refunds by
-  the receipt's proof, section 7). Every paid session ends with a delivery
+  the receipt's proof, section 7): the host signs each one, from the station
+  screen's refund card (section 4). Every paid session ends with a delivery
   verdict and the payer's address in `sessions.jsonl`:
   - `delivered`: the meter saw at least `MIN_CURRENT_MA` while this station
     was verified to be charging the phone
@@ -427,6 +459,10 @@ its own wallet, with real money on public, so:
     `{"change": "0.7000000", "capped": "1.0000000", "unused": "0.0000000", "asset": "XLM"}`.
     It is a hint for the host, who decides and pays the refund by hand; an
     `interrupted` session has only `change` (the rest is unknown).
+  - `refunds`: the same money per payer, each with its SEP-7 refund URI,
+    which the station screen shows until the host pays it (section 4,
+    "Refunds by hand"). Each `orphan`, `refused` and `underpaid` line has
+    one too; `dust` never.
 - **Receipt.** When a paid session ends, the FINISHED screen shows a receipt
   QR for `FINISHED_SECONDS` (20 s) instead of the pay QR: memo, network,
   host key, amount, fichas, paid seconds, seconds charged here (`u`, the
