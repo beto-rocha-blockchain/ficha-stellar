@@ -271,12 +271,16 @@ describe("refund against the host's payments on the ledger", () => {
     expect(ledger(uri("0.95"), [...other, ...paid])).toMatchObject({ state: "ok", total: "5" });
   });
 
-  it("counts a session's payment below one ficha (underpaid, or after it closed) but never lets it cover more", () => {
-    // Address poisoning's 0.0001 XLM under a session's memo: at most that 0.0001 back to its own sender.
+  it("never counts a payment below one ficha, whatever its memo: dust, which the station never refunds", () => {
+    // Address poisoning copies the session's memo from the ledger: 0.0001 XLM under it, from a look-alike or anyone.
     const dust = [op(LOOKALIKE, PUBLIC_HOST, "0.0001000", SESSION), op(PAYER, PUBLIC_HOST, "0.0001000", SESSION)];
-    expect(ledger(uri("0.95"), dust)).toMatchObject({ state: "more_than_paid", total: "0.0001" });
-    expect(ledger(uri("0.0001"), dust).state).toBe("ok");
-    expect(ledger(uri("0.3"), [op(PAYER, PUBLIC_HOST, "0.3000000", SESSION)]).state).toBe("ok");
+    expect(ledger(uri("0.95"), dust).state).toBe("no_payment");
+    expect(ledger(uri("0.0001"), dust).state).toBe("no_payment");
+    // Underpaid (below the 0.5 XLM ficha): logged, never a refund due.
+    expect(ledger(uri("0.4999999"), [op(PAYER, PUBLIC_HOST, "0.4999999", SESSION)]).state).toBe("no_payment");
+    // Next to a real payment it adds nothing.
+    expect(ledger(uri("1.0001"), [...dust, op(PAYER, PUBLIC_HOST, "1.0000000", SESSION)])).toMatchObject({ state: "more_than_paid", total: "1" });
+    expect(ledger(uri("0.5"), [op(PAYER, PUBLIC_HOST, "0.5000000", SESSION)])).toMatchObject({ state: "ok", total: "0.5" });
   });
 
   it("matches a payment's REF by its transaction hash, from the payer, for at least one ficha (less is dust)", () => {

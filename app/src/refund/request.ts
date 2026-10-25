@@ -151,10 +151,9 @@ const sum = (ps: HostPayment[]) => fromStroops(ps.reduce((s, p) => s + toStroops
  * for after seeing that one. Otherwise the destination must have paid the
  * host under REF, in the refund's asset, at least the amount. Under REF:
  * with the session as memo, or, for a payment's REF, in a transaction whose
- * hash starts with its hex and for at least one ficha (less, naming none of
- * the station's sessions, is dust, which the station never refunds). A
- * session's count whatever their amount: below one ficha, under a session
- * the station served, it is underpaid or an orphan, refunded in full. A
+ * hash starts with its hex. Only payments of at least one ficha count: less
+ * is dust whatever its memo, which the station never refunds (a look-alike
+ * of a payer copies its memo from the ledger and sends a tiny amount). A
  * link from anywhere can so at most return a payer's own money to that
  * payer, once. Only "ok" may be signed.
  */
@@ -163,9 +162,9 @@ export function checkLedger(r: RefundRequest, station: Pick<Station, "host_key" 
   const dest = r.req.destination;
   const ref = r.ref;
   const inAsset = (p: HostPayment) => sameAsset(r.req.asset, { code: p.assetCode, issuer: p.assetIssuer });
-  const underRef = (p: HostPayment) =>
-    ref.kind === "session" ? p.memo === r.refText : p.txHash.toLowerCase().startsWith(ref.tx) && compareAmounts(p.amount, station.ficha_price) >= 0;
-  const paid = payments.filter((p) => p.from === dest && p.to === host && inAsset(p) && underRef(p));
+  const underRef = (p: HostPayment) => (ref.kind === "session" ? p.memo === r.refText : p.txHash.toLowerCase().startsWith(ref.tx));
+  const notDust = (p: HostPayment) => compareAmounts(p.amount, station.ficha_price) >= 0;
+  const paid = payments.filter((p) => p.from === dest && p.to === host && inAsset(p) && underRef(p) && notDust(p));
   const refunds = payments.filter((p) => p.from === host && p.to === dest && inAsset(p) && p.memo === r.req.memo);
   if (refunds.length > 0) return { state: "refunded", paid, refunds, refunded: sum(refunds) };
   if (paid.length === 0) return { state: "no_payment", complete };

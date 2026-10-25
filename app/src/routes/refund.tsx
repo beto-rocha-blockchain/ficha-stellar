@@ -158,7 +158,7 @@ function ledgerBlock(c: Exclude<LedgerCheck, { state: "ok" }>, r: RefundRequest,
       return [
         t("ledger.no_payment", { ref: r.refText, code }),
         c.complete ? "" : t("ledger.notAll", { n: String(LEDGER_PAGES * 200) }),
-        r.ref.kind === "payment" ? t("ledger.dust", { price: formatAmount(station.ficha_price, lang, 7, 0), code }) : "",
+        t("ledger.dust", { price: formatAmount(station.ficha_price, lang, 7, 0), code }),
       ]
         .filter(Boolean)
         .join(" ");
