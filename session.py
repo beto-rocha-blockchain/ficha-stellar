@@ -192,8 +192,9 @@ class SessionLog:
       free_grant  a device's free emergency minutes (WIFI_PORTAL): its id of
                   the day, what, seconds, when; never its MAC or IP
     Direct mode: a paid session line, and each orphan, refused and underpaid
-    line, carries "refunds", what the host owes back and to whom, each with
-    the SEP-0007 URI that pays it (Station._session_refunds()); dust never.
+    line whose memo names this station, carries "refunds", what the host
+    owes back and to whom, each with the SEP-0007 URI that pays it
+    (Station._session_refunds(), _uncredited_refunds()); dust never.
       refunded    a payment the host sent that pays one of them: its memo
                   "refund <REF>", to that refund's payer, in its asset
                   (Station.on_host_payment())
@@ -846,7 +847,8 @@ class Station:
 
     def _log_uncredited(self, p: Payment, kind: str, reason: str, custody: dict | None = None) -> None:
         log.warning("%s payment %s: %s", kind, p.tx_hash, reason)
-        # Direct mode: owed back in full, to its own payer. Dust never is.
+        # Direct mode: owed back in full, to its own payer, when its memo
+        # names this station. Dust never is.
         refunds = None if self.cfg.custody or kind == "dust" else self._uncredited_refunds(p)
         self.log.write({
             "kind": kind,
@@ -1006,11 +1008,19 @@ class Station:
                 out.append(self._refund_due(payer, due, sid, asset, issuer))
         return out
 
-    def _uncredited_refunds(self, p: Payment) -> list[dict]:
-        """An orphan, refused or underpaid payment is owed back in full, to
-        its own payer, in the asset it came in. Its REF is the session its
-        memo names, if that is one of this station's, else its transaction."""
+    def _uncredited_refunds(self, p: Payment) -> list[dict] | None:
+        """An orphan, refused or underpaid payment whose memo names this
+        station (one of its sessions, or a session memo with its STATION_ID)
+        is owed back in full, to its own payer, in the asset it came in. Its
+        REF is the session its memo names, if that is one of this station's,
+        else its transaction. One with no memo or any other memo is owed
+        nothing here (None, no card): it may be the host's own money (a
+        top-up from an exchange, whose shared account a refund would never
+        reach), and every station sharing the host key would owe it again.
+        The host judges it by hand, from its line."""
         named = p.memo is not None and (p.memo == self.session.id or p.memo in self.closed_ids)
+        if not named and not (self.cfg.station_id and memo_station(p.memo) == self.cfg.station_id):
+            return None
         ref = p.memo if named else refund_tx_ref(self.cfg, p.tx_hash)
         asset, issuer = (p.asset, p.asset_issuer or None) if p.wrong_asset else self._station_asset()
         due = p.amount.quantize(STROOP, rounding=ROUND_DOWN)

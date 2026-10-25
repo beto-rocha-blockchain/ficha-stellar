@@ -1321,26 +1321,37 @@ def test_refunds_due(tmp: Path) -> None:
     check(owed(st) == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM")],
           "both are pending in the station, oldest first")
 
-    paid_by(r, a, "1", memo=None)
+    paid_by(r, a, "1", memo="K7M2QX.F2345678")  # this station's memo, but no session it knows
     tx_ref = f"K7M2QX.tx{r.n:08x}"
     paid_by(r, b, "0.5")
     underpaid = st.session.id
     paid_by(r, a, "0.0001000", memo=None)  # a look-alike's poisoning payment
     paid_by(r, b, "0.3", memo=sid)
     paid_by(r, a, "2", asset="USDC", wrong_asset=True, asset_issuer=HOST)
-    r.pay("1", memo=None)  # GPAYER: not an account the ledger knows
+    r.pay("1", memo=sid)  # GPAYER: not an account the ledger knows
     lines = r.records()[-6:]
     check([(x["kind"], [(y["payer"], y["amount"], y["ref"]) for y in x["refunds"]] if "refunds" in x else None)
            for x in lines]
           == [("orphan", [(a, "1", tx_ref)]), ("underpaid", [(b, "0.5", underpaid)]), ("dust", None),
               ("orphan", [(b, "0.3", sid)]), ("refused", [(a, "2", underpaid)]), ("orphan", [])],
-          "uncredited lines owe their whole amount to their own payer: an orphan naming no session as "
-          "<STATION_ID>.tx<hash>, an underpaid one or one after its session closed as that session; dust has no "
-          "refunds at all; a payer that is no account gets none")
+          "uncredited lines owe their whole amount to their own payer: an orphan with this station's memo but none "
+          "of its sessions as <STATION_ID>.tx<hash>, an underpaid one or one after its session closed as that "
+          "session; dust has no refunds at all; a payer that is no account gets none")
     usdc = lines[4]["refunds"][0]
     check(usdc["asset"] == "USDC" and usdc["asset_issuer"] == HOST
           and usdc["uri"] == refund_uri(r.cfg, a, Decimal(2), underpaid, "USDC", HOST),
           "a payment in another asset is owed back in that asset (code and issuer)")
+    (tmp / "shared").mkdir()
+    r2 = Rig(tmp / "shared", station_id="ABCDEF", cursor_dir=tmp / "shared")
+    n = len(st.refunds_due)
+    top_up = paid_by(r, a, "10", memo=None)  # the host's own top-up from an exchange, say
+    r2.st.on_payment(top_up)  # a station sharing the host key sees it too
+    paid_by(r, a, "5", memo="exchange-ref-123")
+    check([(x["kind"], x["reason"], "refunds" in x) for x in r.records()[-2:]]
+          == [("orphan", "no valid memo", False), ("orphan", "unknown session", False)]
+          and len(st.refunds_due) == n and r2.records()[-1]["kind"] == "orphan" and r2.st.refunds_due == [],
+          "no memo, or a memo naming none of this station's sessions: an orphan for the host to judge by hand, never "
+          "a refund due (the host's own top-up from an exchange, say), nor on another station sharing the host key")
     before = owed(st)
     check(before == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM"), (tx_ref, a, "1", "XLM"),
                      (underpaid, b, "0.5", "XLM"), (sid, b, "0.3", "XLM"), (underpaid, a, "2", "USDC")],
@@ -1375,7 +1386,7 @@ def test_refunds_due(tmp: Path) -> None:
     r = Rig(tmp / "pub", cursor_dir=tmp / "pub")
     r.cfg = on_public(r.cfg, cursor_dir=tmp / "pub")
     r.st = r.station(r.relay, r.log)
-    paid_by(r, a, "1", memo=None)
+    paid_by(r, a, "1", memo="K7M2QX.F2345678")
     check("network_passphrase" not in query(r.records()[-1]["refunds"][0]["uri"])
           and r.records()[-1]["refunds"][0]["ref"] == f"K7M2QX.tx{r.n:08x}",
           "the public network: the same refunds, their URIs without network_passphrase")
@@ -1503,7 +1514,7 @@ def test_refunded(tmp: Path) -> None:
     r.tick(100)
     st.end_session()
     r.tick(r.cfg.finished_seconds)
-    paid_by(r, a, "1", memo=None)
+    paid_by(r, a, "1", memo="K7M2QX.F2345678")
     tx_ref = f"K7M2QX.tx{r.n:08x}"
     check(owed(st) == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM"), (tx_ref, a, "1", "XLM")],
           "(three refunds due: the session's two and an orphan's)")
@@ -1583,12 +1594,14 @@ def test_refunded(tmp: Path) -> None:
           "a watcher with no callback for them drops what the host sent: on_payment only gets payments to it")
 
     main = sys.modules.get("main") or import_main(tmp)
-    main.handle_payment(Payment("ab" * 32, "op-r", a, Decimal("1"), "XLM", None, "", "horizon"))
+    main.station.closed_ids.add("F2345678")  # as if it had served that session
+    main.handle_payment(Payment("ab" * 32, "op-r", a, Decimal("1"), "XLM", "F2345678", "", "horizon"))
     ref = main.station.refunds_due[-1]["ref"]
     main.watcher.on_sent(Payment("cd" * 32, "op-s", HOST, Decimal("1"), "XLM", f"refund {ref}", "", "horizon",
                                  destination=a))
-    check(ref == "txabababababab" and all(e["ref"] != ref for e in main.station.refunds_due),
-          "main.py: what the host sends reaches the station (no STATION_ID: the orphan's REF is tx<12 hex>)")
+    check(ref == "F2345678" and all(e["ref"] != ref for e in main.station.refunds_due),
+          "main.py: what the host sends reaches the station (no STATION_ID: a payment after its session closed, "
+          "REF that session)")
 
 
 def test_refund_screen(tmp: Path) -> None:
@@ -1598,9 +1611,9 @@ def test_refund_screen(tmp: Path) -> None:
     r = Rig(tmp, station_id="K7M2QX", app_url=site, cursor_dir=tmp)
     st = r.st
     check(r.snap()["refund_due"] is None and refund_qr(r.cfg, None) is None, "nothing due: no refund on screen")
-    paid_by(r, a, "1.5", memo=None)
+    paid_by(r, a, "1.5", memo="K7M2QX.F2345678")
     first = f"K7M2QX.tx{r.n:08x}"
-    paid_by(r, b, "2", memo=None)
+    paid_by(r, b, "2", memo="K7M2QX.F3456789")
     newest = f"K7M2QX.tx{r.n:08x}"
     due = r.snap()["refund_due"]
     check(due == {"ref": newest, "payer": b, "amount": "2", "asset": "XLM", "asset_issuer": None,
@@ -1626,7 +1639,8 @@ def test_refund_screen(tmp: Path) -> None:
     check(custody_rig(tmp / "custody").st.snapshot()["refund_due"] is None, "custody: never")
 
     main = sys.modules.get("main") or import_main(tmp)
-    main.handle_payment(Payment("12" * 32, "op-m", a, Decimal("1"), "XLM", None, "", "horizon"))
+    main.station.closed_ids.add("F3456789")
+    main.handle_payment(Payment("12" * 32, "op-m", a, Decimal("1"), "XLM", "F3456789", "", "horizon"))
     shown = main.snapshot()["refund_due"]
     main.station.on_host_payment(Payment("34" * 32, "op-n", HOST, Decimal("1"), "XLM", f"refund {shown['ref']}", "",
                                          "horizon", destination=a))
