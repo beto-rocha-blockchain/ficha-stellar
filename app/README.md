@@ -116,6 +116,7 @@ src/
     stations/index.tsx  stations map + list, from the signed registry
     stations/$id.tsx    one station: terms, payment mode, the wallet's sessions there
     estabelecimentos.tsx  the page for venues that could host a station
+    refund.tsx          the host's refund page (/refund?uri=...), signed in Freighter
   wallet/               keys: sep5.ts (derivation), vault.ts (encryption + IndexedDB),
                         store.ts (status, in-memory key), autolock.ts, index.ts (API)
   stellar/              shared Stellar module: network, horizon reads, tx builders,
@@ -127,6 +128,10 @@ src/
                         host.ts (host mode: register, release, host_refund,
                         pay_host, the host's view), host-store.ts (its state,
                         outside the screens)
+  refund/               a station's refund due, paid by its host: request.ts (the
+                        SEP-0007 refund URI, its station in the signed registry,
+                        the cap), freighter.ts (the Freighter extension: network
+                        and account, sign, check what it signed, submit)
   i18n/                 one file per feature, auto-merged (see below)
   components/           Brand, AppShell, LanguageGate, LockScreen, UnlockForm,
                         RequireUnlocked, NetworkBadge, PageHeader, Placeholder,
@@ -145,6 +150,7 @@ src/
 | `/p` | A custody station's pay link `…/p?v=1&n&h&s&x&a` (contract §7.3, §7.4): signed registry (custody, `escrow`), the escrow's wasm hash and the station's terms on the ledger, the open session, and for a new session its events (a session someone already paid is a stale QR); deadlines by the ledger's time, and no top-up once the station has ended the session (900 s before its deadline). On Pay, `recheckDeposit` reads the session (and a new one's events) again, then `prepareDeposit` (simulated, refuses before signing, and checks the deadline it returns) -> balance with the real fee -> `sendDeposit` inside `<RequireUnlocked>`. A session that is over, with a receipt for it kept (its proof leads to the link's anchor), links back to its claim; a second anchor under an ID this wallet holds open is refused. Deposit records are keyed by the session's ID and anchor |
 | `/r` | Receipt QR `…/r?v=1&m=…` (contract §3). Public route (works while locked or with no wallet). `v=2` (custody, §7.6): the proof against this wallet's deposit (the one its proof leads to; the receipt with the most unused units is kept with it), then `prepareClaim` -> `sendClaim`. With no wallet, or one that did not pay, `publicReceipt` checks it in public: the session its proof names on the contract, open or settled, with the transactions |
 | `/host`, `/host/station` | Host mode, testnet only (Ajustes → Anfitrião): this wallet as a station's host. `loadHostView` (one getEvents filter per host and escrow, then the ledger entries), `releaseSession`/`releaseMany`, `prepareHostRefund` (in full before the deadline, any part after it), `prepareRegister`, and `collectOwed` (pay_host: every claim's host share waits in the contract, owed); deadlines by the ledger's clock (`ledgerClockNow`); all simulated before signing, inside `<RequireUnlocked>` |
+| `/refund` | The host pays back a refund due, from the station screen's operator button: `/refund?uri=<encodeURIComponent(SEP-0007 URI)>`, memo `refund <REF>` (`src/refund/request.ts`). Public route (no Ficha wallet, no PIN). The network is the URI's (no `network_passphrase` = public), not the app's setting; the station in REF must be active and direct in that network's signed registry, in the refund's asset, and the amount at most `ficha_price × max_session_minutes / ficha_minutes` plus one ficha. The Freighter extension (`@stellar/freighter-api`, `src/refund/freighter.ts`) must be on that network with the station's `host_key`; `buildPaymentTx` from the host -> Freighter's `signTransaction` (the same transaction, signed by the host, or nothing is sent) -> `submitTx`. An unknown outcome is never sent again from the page |
 | `/history` | The user's own payments (Horizon `join=transactions` for memos), and custody deposits (`src/custody/sessions.ts`: the phone's records, deposit/settle events, `session()`); an open custody session with a kept receipt links to its claim |
 | `/stations`, `/stations/$id`, `/estabelecimentos` | Map (react-leaflet) + list from the **signed** registry (`liveRegistryUrl` first, then the bundled `registryUrl`/`registrySigUrl`, `registryKey` in `config.ts`; verify the raw bytes with `Keypair.fromPublicKey(key).verify(bytes, sig)`; reject a `network` mismatch). Public routes |
 | `/buy` | SEP-10 (`WebAuth`) + SEP-24 with `anchorDomain` from `config.ts` (testnet: testanchor.stellar.org; public: none yet) |
