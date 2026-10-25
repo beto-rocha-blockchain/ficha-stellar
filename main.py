@@ -62,8 +62,10 @@ meter = meter_mod.from_config(cfg, powered=lambda: not relay.is_open)
 sampler = meter_mod.Sampler(meter)
 # Each poll Horizon answers reaches the station: on the public network, until
 # the first and when none has for a while, the screen shows no pay QR (a real
-# payment made then would not be seen).
-watcher = (HorizonWatcher(cfg, on_payment=lambda p: handle_payment(p), on_read=station.on_horizon)
+# payment made then would not be seen). The payments the host sends reach it
+# too, apart: a refund paid back marks the refund due as paid.
+watcher = (HorizonWatcher(cfg, on_payment=lambda p: handle_payment(p), on_read=station.on_horizon,
+                          on_sent=lambda p: handle_sent(p))
            if cfg.host_public_key else None)
 if watcher:
     station.watch_horizon()
@@ -204,6 +206,11 @@ async def _close(ws: WebSocket) -> None:
 
 def handle_payment(p: Payment) -> None:
     station.on_payment(p)
+    broadcast()
+
+
+def handle_sent(p: Payment) -> None:
+    station.on_host_payment(p)
     broadcast()
 
 

@@ -75,8 +75,8 @@ from escrow import deadline as escrow_deadline
 from meter import Reading, plugged
 from relay import Relay
 from stellar import (
-    Payment, format_amount, memo_station, new_session_id, payment_key, refund_memo, refund_tx_ref, refund_uri,
-    session_memo,
+    Payment, format_amount, memo_station, new_session_id, payment_key, refund_memo, refund_ref_of, refund_tx_ref,
+    refund_uri, session_memo,
 )
 
 log = logging.getLogger("ficha.session")
@@ -194,6 +194,9 @@ class SessionLog:
     Direct mode: a paid session line, and each orphan, refused and underpaid
     line, carries "refunds", what the host owes back and to whom, each with
     the SEP-0007 URI that pays it (Station._session_refunds()); dust never.
+      refunded    a payment the host sent that pays one of them: its memo
+                  "refund <REF>", to that refund's payer, in its asset
+                  (Station.on_host_payment())
     Custody mode adds:
       seed        a session's hash chain seed, before its pay link shows
       consumed    a running session's consumed time, every CHECKPOINT_SECONDS
@@ -471,7 +474,7 @@ class Station:
         lines = self.log.read()
         for pos, r in enumerate(lines):
             kind = r.get("kind")
-            if kind in ("credited", "orphan", "underpaid", "refused", "dust", "settled") and "op_id" in r:
+            if kind in ("credited", "orphan", "underpaid", "refused", "dust", "settled", "refunded") and "op_id" in r:
                 self.handled.add(payment_key(r.get("tx_hash"), r.get("op_id")))
             if kind == "session" and r.get("id"):
                 self.closed_ids.add(r["id"])
@@ -506,9 +509,16 @@ class Station:
                 elif kind in ("session", "unserved") and r.get("id"):
                     served = kind == "session"
                     receipts.append((first_credit.get(r["id"], pos) if served else pos, pos, r, served))
-            # Direct mode: the refunds due, in the order they became due.
+            # Direct mode: the refunds due, and what the host paid toward
+            # them, in the order it happened.
             if kind in REFUND_KINDS and isinstance(r.get("refunds"), list):
                 self._owe(r["refunds"])
+            elif kind == "refunded":
+                try:
+                    self._pay_off(self._owed(r.get("ref"), r.get("payer"), r.get("asset"), r.get("asset_issuer")),
+                                  Decimal(str(r["amount"])))
+                except (KeyError, ArithmeticError):
+                    log.warning("refunded line of %s unreadable; skipped", r.get("ref"))
         end = len(lines)
 
         for sid, pays in credited.items():
@@ -1018,6 +1028,56 @@ class Station:
                 continue
             if entry["left"] > 0 and is_account(entry["payer"]):
                 self.refunds_due.append(entry)
+
+    def _owed(self, ref: str | None, payer: str | None, asset: str | None, issuer: str | None) -> list[dict]:
+        """The refunds still due with this REF, to this payer, in this asset."""
+        return [e for e in self.refunds_due
+                if e["ref"] == ref and e["payer"] == payer and e["asset"] == asset and e["asset_issuer"] == issuer]
+
+    def _pay_off(self, owed: list[dict], amount: Decimal) -> None:
+        """`amount` paid toward these refunds, oldest first; those paid in full go."""
+        for e in owed:
+            paid = min(amount, e["left"])
+            e["left"] -= paid
+            amount -= paid
+        self.refunds_due = [e for e in self.refunds_due if e["left"] > 0]
+
+    def on_host_payment(self, p: Payment) -> None:
+        """A payment the host's account sent (stellar.HorizonWatcher): never
+        a payment to a session, whatever its memo. With the memo "refund
+        <REF>" of a refund still due, to that refund's payer (as the log has
+        it) and in its asset, it pays that refund: logged as refunded, and
+        what it leaves unpaid stays due (more than due: the excess is
+        logged). Any other is the host's own business and is ignored."""
+        if p.key in self.handled:
+            return
+        asset, issuer = (p.asset, p.asset_issuer or None) if p.wrong_asset else self._station_asset()
+        ref = refund_ref_of(p.memo)
+        owed = self._owed(ref, p.destination, asset, issuer) if ref else []
+        if not owed:
+            log.info("the host sent %s %s to %s (memo %r): no refund due by it; ignored", p.amount, asset,
+                     p.destination, p.memo)
+            return
+        due = sum((e["left"] for e in owed), Decimal(0))
+        left, excess = max(Decimal(0), due - p.amount), max(Decimal(0), p.amount - due)
+        # After every record queued before it: a restart replays a refund
+        # only after what it pays. Not on disk yet: Horizon hands it over again.
+        self._flush()
+        if self.pending:
+            raise OSError(self.log.error or "session log not writable")
+        self.log.write({"kind": "refunded", "ref": ref, "network": self.cfg.network,
+                        "host_key": self.cfg.host_public_key, "at": self.wallclock(), "payer": p.destination,
+                        "amount": p.amount, "asset": asset, **({"asset_issuer": issuer} if issuer else {}),
+                        "tx_hash": p.tx_hash, "op_id": p.op_id, "memo": p.memo, "due": due, "left": left,
+                        **({"excess": excess} if excess else {}), "source": p.source})
+        self.handled.add(p.key)
+        self._pay_off(owed, p.amount)
+        if excess:
+            log.warning("refund %s to %s: %s %s more than was due", ref, p.destination, format_amount(excess), asset)
+        to = f"{p.destination[:6]}…{p.destination[-6:]}"
+        self._say(f"Refund of {format_amount(p.amount)} {asset} to {to} seen on the ledger"
+                  + (f", {format_amount(left)} still due" if left else "")
+                  + (f", {format_amount(excess)} more than due" if excess else "") + self._tx(p.tx_hash), 10)
 
     # -- custody: the contract's events ----------------------------------------
     def on_escrow(self, ev: Deposit | Settle | Gone) -> None:

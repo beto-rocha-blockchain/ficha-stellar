@@ -1,8 +1,9 @@
 """Watching the ledger for payments to the host.
 
-Polling, not streaming: every HORIZON_POLL_SECONDS we ask Horizon for payments
-to HOST_PUBLIC_KEY after our cursor, with ?join=transactions so the memo comes
-with each record. The cursor lives in a file named by network and account.
+Polling, not streaming: every HORIZON_POLL_SECONDS we ask Horizon for the
+payments of HOST_PUBLIC_KEY after our cursor, with ?join=transactions so the
+memo comes with each record. Those it sends (a refund the host pays back)
+go to their own callback and never credit anything. The cursor lives in a file named by network and account.
 The first run without a cursor starts at the newest payment made before the
 station started: history is never replayed, and nothing paid after the start
 is skipped, even if Horizon could not be reached at first. On testnet, a
@@ -172,6 +173,9 @@ class Payment:
     # the code actually paid ("XLM" for native) and asset_issuer its issuer.
     wrong_asset: bool = False
     asset_issuer: str = ""
+    # The account paid: the host, or, for a payment the host sent (payer is
+    # the host), its recipient.
+    destination: str = ""
 
     @property
     def key(self) -> str:
@@ -214,9 +218,13 @@ class HorizonWatcher:
         on_payment: Callable[[Payment], None],
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         on_read: Callable[[], None] | None = None,
+        on_sent: Callable[[Payment], None] | None = None,
     ) -> None:
         self.cfg = cfg
         self.on_payment = on_payment
+        # A payment the host sent (Station.on_host_payment): a refund it pays
+        # back, or its own business. Never on_payment: it credits nothing.
+        self.on_sent = on_sent
         # Called after each poll Horizon answered (Station.on_horizon): on
         # the public network, with none for a while, the pay QR goes.
         self.on_read = on_read
@@ -333,9 +341,12 @@ class HorizonWatcher:
         return rec.get("asset_code") == self.cfg.asset_code and rec.get("asset_issuer") == self.cfg.asset_issuer
 
     def _to_payment(self, rec: dict) -> Payment | None:
+        """A payment to the host, or one the host sent (payer the host, even
+        to itself), or None."""
         if rec.get("type") not in ACCEPTED_TYPES:
             return None
-        if rec.get("to") != self.cfg.host_public_key:
+        host = self.cfg.host_public_key
+        if rec.get("from") != host and rec.get("to") != host:
             return None
         if not rec.get("transaction_successful", True):
             return None
@@ -354,6 +365,7 @@ class HorizonWatcher:
             created_at=rec.get("created_at", ""),
             wrong_asset=wrong,
             asset_issuer=rec.get("asset_issuer", "") if wrong else "",
+            destination=rec.get("to", ""),
         )
 
     async def poll_once(self, client: httpx.AsyncClient) -> None:
@@ -373,7 +385,15 @@ class HorizonWatcher:
             records = resp.json()["_embedded"]["records"]
             for rec in records:
                 payment = self._to_payment(rec)
-                if payment is not None:
+                if payment is None:
+                    pass
+                elif payment.payer == self.cfg.host_public_key:
+                    # Sent by the host, whatever its memo: never a payment to a session.
+                    log.info("host sent %s %s to %s memo=%r", payment.amount, payment.asset, payment.destination,
+                             payment.memo)
+                    if self.on_sent:
+                        self.on_sent(payment)
+                else:
                     log.info("payment %s %s from %s memo=%r", payment.amount, payment.asset, payment.payer, payment.memo)
                     self.on_payment(payment)
                 self._save_cursor(rec["paging_token"])

@@ -1480,6 +1480,114 @@ class FlakyLog(SessionLog):
         super()._append(line)
 
 
+def horizon_sent(token: str, to: str, amount: str, memo: str | None, **asset) -> dict:
+    """A payment the host sent, as Horizon lists it among the host's payments."""
+    rec = horizon_payment(token, "2026-09-29T12:00:30Z", memo)
+    rec.update({"from": HOST, "to": to, "amount": amount, **asset})
+    return rec
+
+
+def test_refunded(tmp: Path) -> None:
+    print("direct mode: the host's payment with a refund's memo, to its payer, marks it refunded")
+    started = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
+    a, b, other = account(1), account(2), account(3)
+    r = Rig(tmp, station_id="K7M2QX", cursor_dir=tmp)
+    st = r.st
+    sid = st.session.id
+    paid_by(r, a, "1.7")
+    paid_by(r, b, "1.25")
+    paid_by(r, b, "1")
+    r.tick(100)
+    st.end_session()
+    r.tick(r.cfg.finished_seconds)
+    paid_by(r, a, "1", memo=None)
+    tx_ref = f"K7M2QX.tx{r.n:08x}"
+    check(owed(st) == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM"), (tx_ref, a, "1", "XLM")],
+          "(three refunds due: the session's two and an orphan's)")
+    w = HorizonWatcher(r.cfg, st.on_payment, now=lambda: started, on_read=st.on_horizon, on_sent=st.on_host_payment)
+    records = [horizon_payment("100", "2026-09-29T10:00:00Z")]
+    poll(w, records)
+    refunded = lambda: [x for x in r.records() if x["kind"] == "refunded"]
+
+    records.append(horizon_sent("200", a, "1.5888888", f"refund {sid}"))
+    poll(w, records)
+    line = refunded()[-1]
+    check(owed(st) == [(sid, b, "2.0277777", "XLM"), (tx_ref, a, "1", "XLM")]
+          and {k: line[k] for k in ("ref", "payer", "amount", "asset", "tx_hash", "op_id", "due", "left")}
+          == {"ref": sid, "payer": a, "amount": "1.5888888", "asset": "XLM", "tx_hash": "h200", "op_id": "200",
+              "due": "1.5888888", "left": "0"} and line["at"] == r.clock.iso() and "excess" not in line
+          and "Refund of 1.5888888 XLM to " + a[:6] in r.snap()["notice"],
+          "the host pays a's refund (memo 'refund <session>', to a): logged as refunded (ref, payer, amount, tx, op, "
+          "at), cleared, said on screen")
+    records.append(horizon_sent("300", b, "1", f"refund {sid}"))
+    poll(w, records)
+    check(owed(st) == [(sid, b, "1.0277777", "XLM"), (tx_ref, a, "1", "XLM")] and refunded()[-1]["left"] == "1.0277777"
+          and owed(r.station(MockRelay())) == owed(st),
+          "less than due: the rest stays due, also after a restart (the refunded line is replayed)")
+    for token, to, memo, asset in (("400", other, f"refund {sid}", {}), ("500", b, "refund K7M2QX.F2345678", {}),
+                                   ("510", b, sid, {}), ("520", b, None, {}),
+                                   ("530", b, f"refund {sid}", {"asset_type": "credit_alphanum4", "asset_code": "USDC",
+                                                                "asset_issuer": HOST})):
+        records.append(horizon_sent(token, to, "1.0277777", memo, **asset))
+    poll(w, records)
+    check(owed(st) == [(sid, b, "1.0277777", "XLM"), (tx_ref, a, "1", "XLM")] and len(refunded()) == 2
+          and w.cursor == "530",
+          "to another address (a look-alike, say), with another memo, no memo or the bare session ID, or in "
+          "another asset: the host's own business, ignored; the refund stays due, the cursor moves on")
+    records.append(horizon_sent("600", b, "2", f"refund {sid}"))
+    poll(w, records)
+    check(owed(st) == [(tx_ref, a, "1", "XLM")] and refunded()[-1]["left"] == "0"
+          and refunded()[-1]["excess"] == "0.9722223" and "more than due" in r.snap()["notice"],
+          "more than due: cleared, and the excess logged")
+
+    n = len(r.records())
+    records += [horizon_sent("700", a, "5", st.session.id), horizon_sent("710", HOST, "5", st.session.id)]
+    poll(w, records)
+    check(st.state == State.AWAITING_PAYMENT and st.session.fichas == 0 and len(r.records()) == n,
+          "a payment the host sends with the session's memo (to anyone, even to itself) never credits it")
+    records.append(horizon_payment("800", "2026-09-29T12:00:31Z", st.session.id))
+    poll(w, records)
+    check(st.state == State.CHARGING and r.records()[-1]["kind"] == "credited" and w.cursor == "800",
+          "the next payment to the host is still credited")
+    w.cursor = "100"  # Horizon hands it all over again (a cursor not saved)
+    poll(w, records)
+    check(len(refunded()) == 3 and owed(st) == [(tx_ref, a, "1", "XLM")] and st.session.fichas == 1,
+          "handed over again: no refund paid twice, nothing credited twice")
+
+    flaky = FlakyLog(r.cfg.session_log)
+    st3 = r.station(MockRelay(), flaky)
+    w3 = HorizonWatcher(r.cfg, st3.on_payment, now=lambda: started, on_read=st3.on_horizon,
+                        on_sent=st3.on_host_payment)
+    records.append(horizon_sent("900", a, "1", f"refund {tx_ref}"))
+    flaky.broken = True
+    logging.disable(logging.WARNING)
+    try:
+        poll(w3, records)
+    finally:
+        logging.disable(logging.NOTSET)
+    stuck = w3.cursor == "800" and owed(st3) == [(tx_ref, a, "1", "XLM")] and w3.health()["status"] == "error"
+    flaky.broken = False
+    poll(w3, records)
+    check(stuck and w3.cursor == "900" and st3.refunds_due == [] and refunded()[-1]["ref"] == tx_ref,
+          "an orphan refunded as <STATION_ID>.tx<hash>; with the log not writable, nothing changes and the cursor "
+          "stays: Horizon hands it over again once it is")
+
+    got: list[Payment] = []
+    (tmp / "plain").mkdir()
+    plain = HorizonWatcher(replace(r.cfg, cursor_dir=tmp / "plain"), got.append, now=lambda: started)
+    poll(plain, records)
+    check([p.tx_hash for p in got] == ["h800"],
+          "a watcher with no callback for them drops what the host sent: on_payment only gets payments to it")
+
+    main = sys.modules.get("main") or import_main(tmp)
+    main.handle_payment(Payment("ab" * 32, "op-r", a, Decimal("1"), "XLM", None, "", "horizon"))
+    ref = main.station.refunds_due[-1]["ref"]
+    main.watcher.on_sent(Payment("cd" * 32, "op-s", HOST, Decimal("1"), "XLM", f"refund {ref}", "", "horizon",
+                                 destination=a))
+    check(ref == "txabababababab" and all(e["ref"] != ref for e in main.station.refunds_due),
+          "main.py: what the host sends reaches the station (no STATION_ID: the orphan's REF is tx<12 hex>)")
+
+
 def test_robustness(tmp: Path) -> None:
     print("robustness")
     r = Rig(tmp, cursor_dir=tmp)
@@ -4828,7 +4936,7 @@ if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
              ("i", test_money), ("i2", test_refund_uri), ("i3", test_refunds_due), ("j", test_robustness),
-             ("k", test_screens), ("l", test_wrong_asset),
+             ("k", test_screens), ("l", test_wrong_asset), ("l2", test_refunded),
              ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
              ("m4", test_horizon_network), ("m5", test_public_rechecks),
              ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
