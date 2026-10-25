@@ -767,6 +767,8 @@ def test_public(tmp: Path) -> None:
           for h in demo_hosts),
     ):
         refused(on_public(r.cfg, **over), f"public: {what}", says)
+    refused(on_public(r.cfg, registry_key=testnet_registry), "public: the testnet registry key, none pinned",
+            "Put that key (none is pinned for public yet).")
     check(bool(demo_hosts), "public refuses MOCK, MOCK_PAYMENT, REGISTRY_CHECK=false, no STATION_ID, no registry key, and the "
           "testnet demo's host and registry keys as either key, each saying so")
     config.validate(replace(r.cfg, station_id="", registry_check=False, registry_key=testnet_registry,
@@ -786,9 +788,12 @@ def test_public(tmp: Path) -> None:
     config.REGISTRY_KEYS["public"] = pinned
     try:
         refused(on_public(r.cfg), "public: a REGISTRY_KEY other than the pinned one", f"this version pins ({pinned})")
+        refused(on_public(r.cfg, registry_key=testnet_registry), "public: the testnet registry key, one pinned",
+                "leave REGISTRY_KEY empty for the pinned one")
         config.validate(on_public(r.cfg, registry_key=pinned))
         check(load_env(**{k: v for k, v in env.items() if k != "REGISTRY_KEY"}).registry_key == pinned,
-              "once a public key is pinned: an empty REGISTRY_KEY takes it, another one is refused")
+              "once a public key is pinned: an empty REGISTRY_KEY takes it, another one is refused, and the "
+              "testnet one's refusal offers the pinned one")
     finally:
         config.REGISTRY_KEYS["public"] = ""
 

@@ -779,7 +779,8 @@ def validate_public(cfg: Config) -> None:
     for name, value, why in (("HOST_PUBLIC_KEY", cfg.host_public_key, "real payments would go to the demo's "
                               "account. Put the mainnet public key of this station's host"),
                              ("REGISTRY_KEY", rkey, "the public registry is signed with its own key. Put that "
-                              "key, or leave REGISTRY_KEY empty for the pinned one")):
+                              + ("key, or leave REGISTRY_KEY empty for the pinned one" if pinned else
+                                 "key (none is pinned for public yet)"))):
         if value in TESTNET_DEMO_KEYS:
             raise ConfigError(f"{name}={value} is {TESTNET_DEMO_KEYS[value]}, from the testnet demo: on the "
                               f"public network {why}.")
