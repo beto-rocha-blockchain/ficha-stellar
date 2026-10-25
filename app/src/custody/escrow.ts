@@ -17,6 +17,7 @@ import {
   Asset,
   BASE_FEE,
   Contract,
+  Networks,
   TransactionBuilder,
   nativeToScVal,
   rpc,
@@ -324,8 +325,20 @@ export async function readSessions(server: Rpc, keys: ({ escrow: string; host: s
 
 // ---------------------------------------------------------------- calls
 
-/** The most a custody call may cost in fees (0.5 XLM): a deposit is about 0.033 XLM, a claim 0.0024 (contract §7.1). */
+/** The most a custody call may cost in fees on the public network (0.5 XLM): a deposit was about 0.067 XLM, a claim 0.0012, in October 2026 (contract §7.1). */
 export const MAX_CALL_FEE_STROOPS = 5_000_000n;
+/**
+ * On testnet, 30 XLM. Its XLM is free (Friendbot gives 10 000), and its
+ * resource fees surge as its ledger state grows before a reset: on 25 October
+ * 2026 a deposit simulated at 2.23 XLM, over the public cap. Above this the
+ * call is refused all the same.
+ */
+export const MAX_TESTNET_CALL_FEE_STROOPS = 300_000_000n;
+
+/** The fee cap for a call on this network. */
+export function maxCallFee(passphrase: string): bigint {
+  return passphrase === Networks.TESTNET ? MAX_TESTNET_CALL_FEE_STROOPS : MAX_CALL_FEE_STROOPS;
+}
 /** The inclusion fee bid per operation, at most this (the resource fee comes on top). */
 const MAX_INCLUSION_STROOPS = 10_000;
 /** Seconds a signed call stays valid: it is signed right after the simulation. */
@@ -453,7 +466,7 @@ export async function prepareCall(
   checkAuth(sim.result?.auth ?? [], c.auth);
   const prepared = rpc.assembleTransaction(tx, sim).build();
   const fee = BigInt(prepared.fee);
-  if (fee > MAX_CALL_FEE_STROOPS) throw new EscrowError("fee_too_high", prepared.fee);
+  if (fee > maxCallFee(passphrase)) throw new EscrowError("fee_too_high", prepared.fee);
   return { tx: prepared, fee, result: sim.result?.retval };
 }
 

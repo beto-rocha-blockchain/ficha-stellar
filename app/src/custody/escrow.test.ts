@@ -26,6 +26,7 @@ import {
   depositAuth,
   depositTerms,
   fetchEscrowEvents,
+  maxCallFee,
   parseEscrowEvent,
   prepareCall,
   readEscrow,
@@ -306,10 +307,19 @@ describe("prepare and send", () => {
   });
 
   it("refuses a simulation whose fee is out of bounds", async () => {
-    const data = new SorobanDataBuilder(F.deposit_ok.sim.transactionData!).setResourceFee(9_000_000n).build().toXdr("base64");
-    const raw = { ...F.deposit_ok.sim, minResourceFee: "9000000", transactionData: data };
-    const server = fakeRpc({ simulateTransaction: vi.fn(async () => rpc.parseRawSimulation(raw)) });
-    await expect(prepareDeposit(server, NET, req(HOST))).rejects.toMatchObject({ code: "fee_too_high" });
+    const withFee = (stroops: bigint) => {
+      const data = new SorobanDataBuilder(F.deposit_ok.sim.transactionData!).setResourceFee(stroops).build().toXdr("base64");
+      const raw = { ...F.deposit_ok.sim, minResourceFee: String(stroops), transactionData: data };
+      return fakeRpc({ simulateTransaction: vi.fn(async () => rpc.parseRawSimulation(raw)) });
+    };
+    // Testnet: a surge such as 25 October 2026's (a deposit at 2.23 XLM) goes through; 31 XLM does not.
+    await expect(prepareDeposit(withFee(22_303_892n), NET, req(HOST))).resolves.toMatchObject({ fee: expect.any(BigInt) });
+    await expect(prepareDeposit(withFee(310_000_000n), NET, req(HOST))).rejects.toMatchObject({ code: "fee_too_high" });
+  });
+
+  it("caps the fee at 0.5 XLM off testnet and at 30 XLM on testnet", () => {
+    expect(maxCallFee(Networks.TESTNET)).toBe(300_000_000n);
+    expect(maxCallFee(Networks.PUBLIC)).toBe(5_000_000n);
   });
 
   it("maps a claim the contract refuses (NoSession) before signing", async () => {
