@@ -554,6 +554,12 @@ def test_registry(tmp: Path) -> None:
     check(public_key is not None and public_key.group(1) == config.REGISTRY_KEYS["public"] != pinned.group(1)
           and f'registryKey: "{public_key.group(1)}"' in app_config,
           "the public registry key: the contract, config.py and the app pin the same one, not the testnet one")
+    pub_data = (root / "registry" / "stations.public.json").read_bytes()
+    pub_reg = registry.validate(pub_data, "stations.public.json")
+    pub_sig = json.loads((root / "registry" / "stations.public.json.sig").read_text(encoding="utf-8"))
+    check(pub_reg["network"] == "public"
+          and registry.verify_bytes(pub_data, pub_sig, config.REGISTRY_KEYS["public"]) == config.REGISTRY_KEYS["public"],
+          "committed public registry signed by the key pinned for public")
 
     kp = Keypair.random()
     sig = registry.sign_bytes(data, kp)

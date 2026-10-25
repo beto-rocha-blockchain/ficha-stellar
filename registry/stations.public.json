@@ -1,0 +1,28 @@
+{
+  "format": "ficha-registry/1",
+  "issued_at": "2026-10-25T15:50:00Z",
+  "network": "public",
+  "stations": [
+    {
+      "id": "8DY7RJ",
+      "name": "HackMeridian mainnet (direct)",
+      "host_key": "GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN",
+      "asset": {
+        "code": "XLM",
+        "issuer": null
+      },
+      "ficha_price": "0.5",
+      "ficha_minutes": 1,
+      "max_session_minutes": 10,
+      "location": {
+        "lat": 38.7352,
+        "lng": -9.1043,
+        "address": "Demo table near ONE16, Marvila",
+        "city": "Lisboa",
+        "country": "PT"
+      },
+      "hours": "25-26 Oct 2026",
+      "active": true
+    }
+  ]
+}
