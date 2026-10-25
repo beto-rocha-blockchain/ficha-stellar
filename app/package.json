@@ -41,6 +41,7 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@scure/bip39": "^2.4.0",
+    "@stellar/freighter-api": "6.0.1",
     "@stellar/stellar-sdk": "^17.2.1",
     "@tanstack/react-router": "^1.170.40",
     "buffer": "^6.0.3",
