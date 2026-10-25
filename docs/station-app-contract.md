@@ -260,7 +260,8 @@ web+stellar:pay?destination=<payer G…>&amount=<amount>&memo=<URL-encoded "refu
   also reads the host's payments on that network and signs at most what
   the destination paid the host under `<REF>` (memo `<REF>` for a
   session; for a transaction's REF, a transaction whose hash starts with
-  its hex, of 1 ficha or more), in the refund's asset, and nothing once
+  its hex), counting only payments of 1 ficha or more, in the refund's
+  asset, and nothing once
   the host has sent it any payment with the memo `refund <REF>` in that
   asset (a remainder is paid from the station's QR).
 - What is due, in `sessions.jsonl`: a paid session's line carries
