@@ -322,6 +322,13 @@ rules: [free-minutes.md](free-minutes.md).
    account, and real payments would go to the demo's.
 9. The footer badge must read **MAINNET**.
 
+On public, the screen also shows out of service, with no pay QR, until
+Horizon first answers and whenever it has not answered for 10 s (or for
+three polls, with a `HORIZON_POLL_SECONDS` above 3.3): a real payment made
+then would not be seen until it does. A payment made just before is credited
+when Horizon answers again. On testnet a failing Horizon only shows in the
+footer.
+
 ## 5. How money flows
 
 - **The recipient is the host.** Payments go straight from the user's wallet

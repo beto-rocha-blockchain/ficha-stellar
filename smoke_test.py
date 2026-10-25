@@ -835,6 +835,58 @@ def test_public(tmp: Path) -> None:
     check("registry_health = registry_check.startup(cfg)" in main_py, "main.py checks the registry with startup()")
 
 
+def test_horizon_public(tmp: Path) -> None:
+    print("the public network: no pay QR while Horizon is failing")
+    started = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
+    (tmp / "pub").mkdir()
+    r = Rig(tmp / "pub")
+    r.cfg = on_public(r.cfg, cursor_dir=tmp / "pub")
+    config.validate(r.cfg)
+    st = r.st = r.station(r.relay, r.log)
+    w = HorizonWatcher(r.cfg, st.on_payment, now=lambda: started, on_read=st.on_horizon)
+    check(st.out_of_service() is None, "(Horizon not watched: nothing changes)")
+    st.watch_horizon()
+    poll_status(w, 503)
+    check(st.out_of_service() == "horizon: not read yet" and r.snap()["out_of_service"] == "horizon: not read yet"
+          and w.health()["status"] == "error", "public: no pay QR until Horizon first answers")
+    before = [horizon_payment("100", "2026-09-29T10:00:00Z")]
+    poll(w, before)
+    check(st.out_of_service() is None and st.horizon_read_at == r.clock.t and w.health()["status"] == "ok",
+          "public: Horizon answers, the pay QR is shown")
+    r.clock.t += 5
+    poll_status(w, 503)
+    r.clock.t += 5
+    check(st.out_of_service() is None, "public: Horizon failing for 10 s: still shown (a few polls)")
+    r.clock.t += 1
+    check(st.out_of_service() == "horizon: not read for 11 s" and r.snap()["out_of_service"] == st.out_of_service(),
+          "public: Horizon failing for more than 10 s: out of service, the pay QR hidden")
+    poll(w, before + [horizon_payment("200", "2026-09-29T12:00:30Z", st.session.id)])
+    check(st.state == State.CHARGING and r.records()[-1]["kind"] == "credited" and st.out_of_service() is None,
+          "public: Horizon answers again: a payment made meanwhile is credited (not refused), back in service")
+    slow = Station(replace(r.cfg, horizon_poll_seconds=5.0), MockRelay(), SessionLog(tmp / "pub" / "slow.jsonl"),
+                   clock=r.clock, wallclock=r.clock.iso, unixclock=r.unix)
+    slow.watch_horizon()
+    slow.on_horizon()
+    r.clock.t += 15
+    shown = slow.out_of_service() is None
+    r.clock.t += 1
+    check(shown and slow.out_of_service() == "horizon: not read for 16 s",
+          "public, HORIZON_POLL_SECONDS=5: out of service after 3 polls missed (15 s), not 10 s")
+
+    (tmp / "testnet").mkdir()
+    t = Rig(tmp / "testnet", cursor_dir=tmp / "testnet")
+    wt = HorizonWatcher(t.cfg, t.st.on_payment, now=lambda: started, on_read=t.st.on_horizon)
+    t.st.watch_horizon()
+    poll_status(wt, 503)
+    t.clock.t += 600
+    check(t.st.out_of_service() is None and t.snap()["out_of_service"] is None and wt.health()["status"] == "error",
+          "testnet unchanged: Horizon failing shows in the footer only, the pay QR stays")
+    main = sys.modules.get("main") or import_main(tmp)
+    check(main.watcher.on_read == main.station.on_horizon and main.station.horizon_watched
+          and main.cfg.network == "testnet" and main.snapshot()["out_of_service"] is None,
+          "main.py: Horizon's reads reach the station (on testnet, the pay QR stays)")
+
+
 def test_receipt(tmp: Path) -> None:
     print("receipt")
     r = Rig(tmp, station_id="K7M2QX", app_url="https://ficha.test")
@@ -4340,7 +4392,8 @@ if __name__ == "__main__":
     tests = (("a", test_mains), ("b", test_usb_vbus), ("c", test_restart), ("d", test_wifi),
              ("e", test_relay_fails), ("f", test_station_id), ("g", test_registry), ("h", test_receipt),
              ("i", test_money), ("j", test_robustness), ("k", test_screens), ("l", test_wrong_asset),
-             ("m", test_registry_check), ("m2", test_public), ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
+             ("m", test_registry_check), ("m2", test_public), ("m3", test_horizon_public),
+             ("n", test_verify), ("o", test_custody_basics), ("p", test_custody),
              ("q", test_custody_restart), ("r", test_escrow_watch), ("r2", test_escrow_rpc30),
              ("s", test_custody_screens),
              ("t", test_custody_receipts), ("u", test_custody_edges), ("v", test_ledger_reset),

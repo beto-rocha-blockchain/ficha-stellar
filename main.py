@@ -60,7 +60,13 @@ atexit.register(relay.shutdown)
 station = Station(cfg, relay, SessionLog(cfg.session_log))
 meter = meter_mod.from_config(cfg, powered=lambda: not relay.is_open)
 sampler = meter_mod.Sampler(meter)
-watcher = HorizonWatcher(cfg, on_payment=lambda p: handle_payment(p)) if cfg.host_public_key else None
+# Each poll Horizon answers reaches the station: on the public network, until
+# the first and when none has for a while, the screen shows no pay QR (a real
+# payment made then would not be seen).
+watcher = (HorizonWatcher(cfg, on_payment=lambda p: handle_payment(p), on_read=station.on_horizon)
+           if cfg.host_public_key else None)
+if watcher:
+    station.watch_horizon()
 # Custody: the contract's deposit and settle events. The Horizon watcher keeps
 # running: a classic payment with this station's memo is logged for refund.
 # Each poll that succeeds gives the station ledger time, and says the contract

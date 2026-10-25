@@ -131,6 +131,11 @@ RECEIPTS_TRACKED = 20
 # the first), a deposit made now would not be seen: the screen hides the pay
 # QR, as for a relay that does not answer. At least a few polls.
 ESCROW_STALE_SECONDS = 30.0
+# Public network, direct mode: with no successful read of Horizon for this
+# long (and before the first), a real payment made now would not be seen
+# until Horizon answers again, its payer maybe gone: the screen hides the pay
+# QR the same way. At least a few polls. Testnet only shows it in the footer.
+HORIZON_STALE_SECONDS = 10.0
 # Custody: a station clock this far from ledger time is shown as a warning.
 # Deadlines never depend on it (ledger_time()), but the log's times do.
 CLOCK_SKEW_SECONDS = 60
@@ -383,6 +388,10 @@ class Station:
         self.escrow_read_at: float | None = None
         self.escrow_watched = False
         self.clock_skew: int | None = None
+        # When Horizon last answered a poll for the host's payments, and
+        # whether it is watched at all (main.py, watch_horizon()).
+        self.horizon_read_at: float | None = None
+        self.horizon_watched = False
 
         # Never assume the state the board was left in. If the board is not
         # there yet, the error shows on screen and relay.maintain() retries.
@@ -1238,6 +1247,17 @@ class Station:
         first read, and whenever none succeeded for ESCROW_STALE_SECONDS, the
         station is out of service (out_of_service())."""
         self.escrow_watched = True
+
+    def watch_horizon(self) -> None:
+        """main.py: Horizon is watched for payments to the host. On the
+        public network, in direct mode, until the first read and whenever none
+        succeeded for HORIZON_STALE_SECONDS, the station is out of service
+        (out_of_service())."""
+        self.horizon_watched = True
+
+    def on_horizon(self) -> None:
+        """Horizon answered a poll just now (stellar.HorizonWatcher)."""
+        self.horizon_read_at = self.clock()
 
     def on_ledger(self, close_time: int | None) -> None:
         """The contract was read just now (escrow.EscrowWatcher, a page of
@@ -2102,8 +2122,9 @@ class Station:
         writable: it can be neither credited nor logged (Horizon hands it
         over again until it can). Custody, the contract not read for
         ESCROW_STALE_SECONDS (or not yet): a deposit made now would not be
-        seen until it is, with its payer maybe gone. Either way the screen
-        hides the pay QR."""
+        seen until it is, with its payer maybe gone. The public network,
+        Horizon not read for HORIZON_STALE_SECONDS (or not yet): the same,
+        with real money. Either way the screen hides the pay QR."""
         if not self.relay.healthy:
             return f"relay: {self.relay.error}"
         if self.log.error:
@@ -2120,6 +2141,12 @@ class Station:
             stale = max(ESCROW_STALE_SECONDS, 3 * self.cfg.horizon_poll_seconds)
             if self.clock() - self.escrow_read_at > stale:
                 return f"escrow: the contract not read for {int(self.clock() - self.escrow_read_at)} s"
+        if self.cfg.network == "public" and not self.cfg.custody and self.horizon_watched:
+            if self.horizon_read_at is None:
+                return "horizon: not read yet"
+            stale = max(HORIZON_STALE_SECONDS, 3 * self.cfg.horizon_poll_seconds)
+            if self.clock() - self.horizon_read_at > stale:
+                return f"horizon: not read for {int(self.clock() - self.horizon_read_at)} s"
         return None
 
     def snapshot(self) -> dict:

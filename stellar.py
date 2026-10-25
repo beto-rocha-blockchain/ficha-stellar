@@ -153,9 +153,13 @@ class HorizonWatcher:
         cfg: Config,
         on_payment: Callable[[Payment], None],
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        on_read: Callable[[], None] | None = None,
     ) -> None:
         self.cfg = cfg
         self.on_payment = on_payment
+        # Called after each poll Horizon answered (Station.on_horizon): on
+        # the public network, with none for a while, the pay QR goes.
+        self.on_read = on_read
         # Payments made after this are this run's business, however long
         # Horizon takes to answer the first time.
         self.started_at = now()
@@ -319,6 +323,10 @@ class HorizonWatcher:
         try:
             await self.poll_once(client)
             self.last_ok = time.monotonic()
+            # Horizon answered, payments are seen: even when the cursor file
+            # could not be saved (the footer says so).
+            if self.on_read:
+                self.on_read()
             if self.cursor_error:
                 self._set("error", self.cursor_error)
             else:
