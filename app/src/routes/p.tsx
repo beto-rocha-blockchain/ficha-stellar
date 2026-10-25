@@ -12,6 +12,7 @@
  * the last payment (src/pay/last-payment.ts). A session that is over, with a
  * receipt kept for it, leads back to its claim.
  */
+import { Networks } from "@stellar/stellar-sdk";
 import { useEffect, useMemo, useState } from "react";
 import { Link, createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Clock, ExternalLink, History, Loader2, Minus, Plus, ScanLine, ShieldAlert, ShieldCheck, Undo2 } from "lucide-react";
@@ -42,8 +43,14 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/p")({ component: CustodyPayScreen });
 
-/** Shown before the simulation gives the real fee: a deposit costs about 0.033 XLM on testnet (contract §7.1). */
-const FEE_ESTIMATE_STROOPS = 500_000n;
+/**
+ * Shown before the simulation gives the real fee, which is checked before
+ * signing. Measured: a deposit cost 0.067 XLM on 23 October 2026, then 2.23
+ * XLM on testnet on 25 October, after its resource fees surged (contract §7.1).
+ */
+function feeEstimate(passphrase: string): bigint {
+  return passphrase === Networks.TESTNET ? 25_000_000n : 700_000n;
+}
 
 /** Errors after which this session cannot be paid from this link as shown: no retry, the page reads it again. */
 const FINAL = new Set(["OtherPayer", "TermsChanged", "Expired", "Inactive", "UnknownStation", "BadFichas", "session_changed", "stale_qr"]);
@@ -317,7 +324,7 @@ function CustodyForm({ link, station, onDone }: { link: PayLink; station: Custod
   const code = station.asset.code;
   const minutes = (count * (plan.kind === "topup" ? plan.session.fichaSecs : cc.terms.fichaSecs)) / 60;
   const data = summary.data;
-  const funds = data ? paymentFunds(data, station.asset, amountText, FEE_ESTIMATE_STROOPS) : null;
+  const funds = data ? paymentFunds(data, station.asset, amountText, feeEstimate(net.passphrase)) : null;
   const finalFailure = failure instanceof EscrowError && FINAL.has(failure.code);
 
   const pay = async () => {
@@ -421,7 +428,7 @@ function CustodyForm({ link, station, onDone }: { link: PayLink; station: Custod
             {formatAmount(amountText, lang, 7, 2)} {code}
           </span>
         </div>
-        <div className="mt-1 text-right text-[11px] text-muted-foreground">{t("p.fee", { fee: formatAmount(fromStroops(FEE_ESTIMATE_STROOPS), lang, 7, 2) })}</div>
+        <div className="mt-1 text-right text-[11px] text-muted-foreground">{t("p.fee", { fee: formatAmount(fromStroops(feeEstimate(net.passphrase)), lang, 7, 2) })}</div>
         {funds?.balance != null && (
           <div className={cn("text-right text-[11px]", funds.coversAmount ? "text-muted-foreground" : "text-destructive")}>
             {tp("pay.balance", { amount: formatAmount(funds.balance, lang, 7, 2), code })}
