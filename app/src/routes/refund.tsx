@@ -9,7 +9,9 @@
  * yet (the host's payments on the ledger, read on load and again right
  * before building), Freighter must be on that
  * network with the station's host_key, and the destination is shown in full
- * before signing. An unknown outcome is never sent again from here.
+ * before signing. Without an answer from the network it waits until the
+ * refund's time bound has passed, then says whether it landed; it never
+ * sends one again on its own.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useRouterState } from "@tanstack/react-router";
@@ -18,7 +20,7 @@ import { explorerUrl, type NetworkConfig } from "@/config";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageHeader";
 import { useLang, useT } from "@/i18n";
-import { formatDateTime, shortAddress } from "@/lib/format";
+import { formatDateTime, formatTimeOfDay, shortAddress } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { HostPayment } from "@/pay/history";
 import { getRegistry, type Registry, type Station } from "@/registry";
@@ -354,9 +356,14 @@ type Send =
   | { state: "signing" }
   | { state: "sending" }
   | { state: "done"; hash: string }
-  /** No answer from the network: it MAY have landed. Never sent again from this page. */
-  | { state: "unknown" }
+  /** No answer from the network yet: it may land until `until` (unix s), and the page waits that long. */
+  | { state: "checking"; until: number }
+  /** Still no answer after that: it MAY have landed. Never sent again from this page. */
+  | { state: "unknown"; until: number }
   | { state: "error"; text: string };
+
+/** A time bound as a time of day, rounded up to the minute: a refund unseen by then never lands. */
+const boundTime = (until: number, lang: "pt-BR" | "en") => (until > 0 ? formatTimeOfDay(Math.ceil(until / 60) * 60, lang) : "—");
 
 function freighterText(e: unknown, t: (k: string, v?: Record<string, string>) => string): string {
   if (e instanceof FreighterError) {
@@ -392,6 +399,7 @@ function SignRefund({ r, station, onBlocked }: { r: RefundRequest; station: Stat
     if (sending.current) return;
     sending.current = true;
     setSend({ state: "signing" });
+    let until = 0;
     try {
       // The host may have switched account or network in Freighter since connecting.
       const now = await readFreighter();
@@ -401,10 +409,21 @@ function SignRefund({ r, station, onBlocked }: { r: RefundRequest; station: Stat
         sending.current = false;
         return;
       }
-      const res = await sendRefund(r, station, () => setSend({ state: "sending" }));
+      const res = await sendRefund(r, station, {
+        signed: () => setSend({ state: "sending" }),
+        unknown: (maxTime) => {
+          until = maxTime;
+          setSend({ state: "checking", until });
+        },
+      });
       setSend({ state: "done", hash: res.hash });
     } catch (e) {
-      if (e instanceof SubmitError && e.kind === "unknown") setSend({ state: "unknown" });
+      if (e instanceof SubmitError && e.kind === "unknown") setSend({ state: "unknown", until });
+      else if (e instanceof SubmitError && e.resultCodes?.transaction === "tx_too_late") {
+        // Expired unapplied (past its time bound, or signed too late): nothing was paid, it may be signed again.
+        setSend({ state: "error", text: t("expired") });
+        sending.current = false;
+      }
       // The ledger, read again right before building, no longer allows it: nothing was signed.
       else if (e instanceof LedgerBlockError) onBlocked(e.check);
       else {
@@ -433,7 +452,7 @@ function SignRefund({ r, station, onBlocked }: { r: RefundRequest; station: Stat
   const session = conn.state === "connected" ? conn.session : null;
   const blocks = session ? freighterBlocks(session, r.net, hostKey) : [];
   const ready = session !== null && blocks.length === 0;
-  const busy = send.state === "signing" || send.state === "sending";
+  const busy = send.state === "signing" || send.state === "sending" || send.state === "checking";
 
   return (
     <div className="space-y-3">
@@ -458,11 +477,17 @@ function SignRefund({ r, station, onBlocked }: { r: RefundRequest; station: Stat
       )}
 
       {send.state === "error" && <Blocked text={send.text} />}
+      {send.state === "checking" && (
+        <div role="status" className="flex items-start gap-2 rounded-xl border-2 border-warning bg-warning/10 p-3 text-sm">
+          <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-warning" />
+          <div>{t("checkingOutcome", { time: boundTime(send.until, lang) })}</div>
+        </div>
+      )}
       {send.state === "unknown" && (
         <div role="alert" className="flex items-start gap-2 rounded-xl border-2 border-warning bg-warning/10 p-3 text-sm">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
           <div>
-            {t("unknownOutcome")}{" "}
+            {t("unknownOutcome", { time: boundTime(send.until, lang) })}{" "}
             <a href={explorerUrl(r.net, "account", hostKey)} target="_blank" rel="noreferrer" className="text-primary underline">
               {t("hostHistory")}
             </a>
@@ -480,7 +505,7 @@ function SignRefund({ r, station, onBlocked }: { r: RefundRequest; station: Stat
           )}
           <Button size="lg" className="w-full" onClick={refund} disabled={busy || send.state === "unknown"}>
             {busy ? <Loader2 className="animate-spin" /> : <Undo2 />}
-            {send.state === "signing" ? t("signing") : send.state === "sending" ? t("sending") : t("sign", { amount, code })}
+            {send.state === "signing" ? t("signing") : send.state === "sending" || send.state === "checking" ? t("sending") : t("sign", { amount, code })}
           </Button>
         </>
       )}

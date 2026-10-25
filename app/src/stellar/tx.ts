@@ -5,7 +5,7 @@
  *   const tx = await buildPaymentTx({ net, source: publicKey, destination, asset, amount, memo });
  *   const { hash } = await submitTx(net, signTransaction(tx));
  */
-import { Asset, BASE_FEE, Memo, Operation, TransactionBuilder, type FeeBumpTransaction, type Horizon, type Transaction } from "@stellar/stellar-sdk";
+import { Asset, BASE_FEE, Memo, NotFoundError, Operation, TransactionBuilder, type FeeBumpTransaction, type Horizon, type Transaction } from "@stellar/stellar-sdk";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { AssetRef, NetworkConfig } from "@/config";
 import { addAmounts, compareAmounts, fromStroops, toStroops } from "./amount";
@@ -133,8 +133,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Submit a signed transaction. On a timeout or network error it does NOT
- * resubmit blindly: it polls the hash until the tx shows up or its time
- * bounds expire, then throws SubmitError("unknown") if still unseen.
+ * resubmit blindly: it polls the hash for about 30 s, then throws
+ * SubmitError("unknown") if still unseen. The transaction may still land
+ * until its time bound: awaitTxOutcome waits that long.
  */
 export async function submitTx(net: NetworkConfig, tx: Transaction | FeeBumpTransaction): Promise<{ hash: string; ledger: number }> {
   const server = getServer(net);
@@ -160,5 +161,40 @@ export async function submitTx(net: NetworkConfig, tx: Transaction | FeeBumpTran
       }
     }
     throw new SubmitError("unknown", undefined, hash);
+  }
+}
+
+const notFound = (e: unknown) => e instanceof NotFoundError || (e as { response?: { status?: number } })?.response?.status === 404;
+
+/**
+ * After a SubmitError "unknown": poll the hash until a ledger has closed
+ * after the transaction's `maxTime` (unix s), when it can no longer be
+ * applied. The answer is then certain: { hash, ledger } if it landed,
+ * SubmitError "rejected" if it failed, or "rejected" with tx_too_late if it
+ * never landed (nothing happened, safe to sign again). Horizon still without
+ * an answer `giveUpSec` after maxTime, by this device's clock (or no time
+ * bound): SubmitError "unknown".
+ */
+export async function awaitTxOutcome(net: NetworkConfig, hash: string, maxTime: number, pollMs = 5000, giveUpSec = 300): Promise<{ hash: string; ledger: number }> {
+  const server = getServer(net);
+  for (;;) {
+    if (!(maxTime > 0) || Date.now() / 1000 > maxTime + giveUpSec) throw new SubmitError("unknown", undefined, hash);
+    // The newest ledger first: a transaction still not found once one closed after maxTime never lands.
+    let closedAt = NaN;
+    try {
+      const page = await server.ledgers().order("desc").limit(1).call();
+      closedAt = Date.parse(page.records[0]?.closed_at ?? "") / 1000;
+    } catch {
+      /* no answer: poll again */
+    }
+    try {
+      const t = await server.transactions().transaction(hash).call();
+      if (t.successful) return { hash, ledger: t.ledger_attr };
+      throw new SubmitError("rejected", undefined, hash);
+    } catch (e) {
+      if (e instanceof SubmitError) throw e;
+      if (notFound(e) && closedAt > maxTime) throw new SubmitError("rejected", { transaction: "tx_too_late" }, hash);
+    }
+    await sleep(pollMs);
   }
 }

@@ -12,7 +12,7 @@ import { getAddress, getNetworkDetails, isConnected, requestAccess, signTransact
 import { FeeBumpTransaction, Keypair, TransactionBuilder, type Transaction } from "@stellar/stellar-sdk";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { shortAddress } from "@/lib/format";
-import { buildPaymentTx, submitTx } from "@/stellar/tx";
+import { SubmitError, awaitTxOutcome, buildPaymentTx, submitTx } from "@/stellar/tx";
 import type { NetworkConfig } from "@/config";
 import type { Station } from "@/registry/verify";
 import { networkFor, readRefundLedger, type LedgerCheck, type RefundRequest } from "./request";
@@ -121,15 +121,29 @@ export class LedgerBlockError extends Error {
 
 /**
  * Check the ledger again (the page's check may be minutes old), build, sign
- * in Freighter and submit, once. A SubmitError "unknown" means it MAY have
- * gone through: the caller never sends it again on its own. `onSigned`:
- * Freighter has signed, the submit starts.
+ * in Freighter and submit, once. Without an answer from Horizon it never
+ * sends again: it waits until the refund has landed or can no longer land
+ * (awaitTxOutcome, past its 180 s time bound), so a SubmitError "unknown"
+ * is left only when Horizon stays silent. `on.signed`: Freighter has signed,
+ * the submit starts; `on.unknown`: no answer yet, it may land until maxTime
+ * (unix s).
  */
-export async function sendRefund(r: RefundRequest, station: Pick<Station, "host_key" | "ficha_price">, onSigned?: () => void): Promise<{ hash: string; ledger: number }> {
+export async function sendRefund(
+  r: RefundRequest,
+  station: Pick<Station, "host_key" | "ficha_price">,
+  on: { signed?: () => void; unknown?: (maxTime: number) => void } = {},
+): Promise<{ hash: string; ledger: number }> {
   const ledger = await readRefundLedger(r, station);
   if (ledger.state !== "ok") throw new LedgerBlockError(ledger);
   const tx = await buildRefundTx(r, station.host_key);
   const signed = await signWithFreighter(tx, r.net, station.host_key);
-  onSigned?.();
-  return submitTx(r.net, signed);
+  on.signed?.();
+  try {
+    return await submitTx(r.net, signed);
+  } catch (e) {
+    if (!(e instanceof SubmitError) || e.kind !== "unknown") throw e;
+    const maxTime = Number(signed.timeBounds?.maxTime ?? 0);
+    on.unknown?.(maxTime);
+    return awaitTxOutcome(r.net, bytesToHex(signed.hash()), maxTime);
+  }
 }

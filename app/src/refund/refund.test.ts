@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { Account, Asset, Horizon, Keypair, Networks, Operation, TransactionBuilder, type Transaction } from "@stellar/stellar-sdk";
+import { Account, Asset, Horizon, Keypair, Networks, NotFoundError, Operation, TransactionBuilder, type Transaction } from "@stellar/stellar-sdk";
 import { clear, createStore } from "idb-keyval";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NETWORKS } from "@/config";
@@ -461,6 +461,54 @@ describe("the refund transaction", () => {
     expect(submitted).toEqual([]);
   });
 
+  describe("with no answer from Horizon to the submit", () => {
+    let txCall: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.spyOn(Horizon.Server.prototype, "submitTransaction").mockImplementation(async (tx) => {
+        submitted.push(tx as Transaction);
+        throw Object.assign(new Error("Gateway Timeout"), { response: { status: 504 } });
+      });
+      // The newest ledger closes now, by the (fake) clock.
+      vi.spyOn(Horizon.Server.prototype, "ledgers").mockReturnValue({
+        order: () => ({ limit: () => ({ call: async () => ({ records: [{ closed_at: new Date().toISOString() }] }) }) }),
+      } as never);
+      txCall = vi.fn(async () => {
+        throw new NotFoundError("Not Found", { status: 404 });
+      });
+      vi.spyOn(Horizon.Server.prototype, "transactions").mockReturnValue({ transaction: () => ({ call: txCall }) } as never);
+    });
+
+    afterEach(() => vi.useRealTimers());
+
+    it("waits past the 30 s of polling, until the refund lands, and never sends it again", async () => {
+      const unknown = vi.fn();
+      const done = sendRefund(parseRefundUri(uri()), hosted, { unknown });
+      // In core's queue under surge pricing: on the ledger at about 60 s.
+      await vi.advanceTimersByTimeAsync(55_000);
+      expect(unknown).toHaveBeenCalledTimes(1);
+      const maxTime = Number(submitted[0].timeBounds?.maxTime);
+      expect(unknown).toHaveBeenCalledWith(maxTime);
+      txCall.mockResolvedValue({ successful: true, ledger_attr: 61 });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await done).toEqual({ hash: Buffer.from(submitted[0].hash()).toString("hex"), ledger: 61 });
+      expect(submitted).toHaveLength(1);
+      expect(freighter.signTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    it("says it expired, nothing paid, only after a ledger closed past its 180 s time bound", async () => {
+      const settled = vi.fn();
+      const done = sendRefund(parseRefundUri(uri()), hosted);
+      done.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(175_000);
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(done).rejects.toMatchObject({ kind: "rejected", resultCodes: { transaction: "tx_too_late" } });
+      expect(submitted).toHaveLength(1);
+    });
+  });
+
   it("submits nothing when Freighter refuses, signs another transaction, or signs as another account", async () => {
     const r = parseRefundUri(uri());
     freighter.signTransaction.mockResolvedValueOnce({ signedTxXdr: "", signerAddress: "", error: { code: -4, message: "The user rejected this request." } });
@@ -523,7 +571,9 @@ describe("the /refund page", () => {
       "notInstalled",
       "refused",
       "badSignature",
+      "checkingOutcome",
       "unknownOutcome",
+      "expired",
     ];
     const page = read("../routes/refund.tsx");
     for (const s of [...states, ...ledger]) expect(page, s).toContain(`case "${s}":`);
