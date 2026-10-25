@@ -247,7 +247,7 @@ def test_mains(tmp: Path) -> None:
           "payment on the FINISHED screen: the screen says it was not credited")
     r.pay("0.5", memo=sid)
     check((r.records()[-1]["kind"], r.records()[-1]["reason"]) == ("orphan", "session already closed"),
-          "below 1 ficha but with a closed session's memo: a real payer, an orphan to refund, not dust")
+          "below 1 ficha but with a closed session's memo: an orphan, not dust (maybe a real payer: the host judges)")
     r.tick(r.cfg.finished_seconds)
     check(st.state == State.AWAITING_PAYMENT and st.session.id != sid, "new session id after FINISHED")
     rec = [x for x in r.records() if x["kind"] == "session"][-1]
@@ -1302,6 +1302,10 @@ def test_refunds_due(tmp: Path) -> None:
     paid_by(r, a, "1.7")  # 1 ficha, 0.7 change
     paid_by(r, b, "1.25")  # 1 ficha, 0.25 change
     paid_by(r, b, "1")  # 1 more ficha: b has 2 of the session's 3
+    paid_by(r, account(9), "0.0001000")  # a look-alike of b, the session's memo copied from the ledger
+    check((r.records()[-1]["kind"], "refunds" in r.records()[-1], st.refunds_due) == ("underpaid", False, []),
+          "below 1 ficha with the live session's memo, while charging (a look-alike's poisoning payment): "
+          "underpaid, logged, never a refund due")
     r.tick(100)
     st.end_session()  # 800 s of 900 unused: 2.6666666... XLM at 1 XLM per 5 min
     check(st.refunds_due == [] and "refunds" in r.records()[-1] and r.records()[-1]["kind"] == "finished",
@@ -1326,17 +1330,18 @@ def test_refunds_due(tmp: Path) -> None:
     paid_by(r, b, "0.5")
     underpaid = st.session.id
     paid_by(r, a, "0.0001000", memo=None)  # a look-alike's poisoning payment
-    paid_by(r, b, "0.3", memo=sid)
+    paid_by(r, b, "1.3", memo=sid)
     paid_by(r, a, "2", asset="USDC", wrong_asset=True, asset_issuer=HOST)
     r.pay("1", memo=sid)  # GPAYER: not an account the ledger knows
     lines = r.records()[-6:]
     check([(x["kind"], [(y["payer"], y["amount"], y["ref"]) for y in x["refunds"]] if "refunds" in x else None)
            for x in lines]
-          == [("orphan", [(a, "1", tx_ref)]), ("underpaid", [(b, "0.5", underpaid)]), ("dust", None),
-              ("orphan", [(b, "0.3", sid)]), ("refused", [(a, "2", underpaid)]), ("orphan", [])],
-          "uncredited lines owe their whole amount to their own payer: an orphan with this station's memo but none "
-          "of its sessions as <STATION_ID>.tx<hash>, an underpaid one or one after its session closed as that "
-          "session; dust has no refunds at all; a payer that is no account gets none")
+          == [("orphan", [(a, "1", tx_ref)]), ("underpaid", None), ("dust", None),
+              ("orphan", [(b, "1.3", sid)]), ("refused", [(a, "2", underpaid)]), ("orphan", [])],
+          "uncredited lines of 1 ficha or more owe their whole amount to their own payer: an orphan with this "
+          "station's memo but none of its sessions as <STATION_ID>.tx<hash>, one refused or after its session closed "
+          "as that session; below 1 ficha (underpaid) and dust have no refunds at all; a payer that is no account "
+          "gets none")
     usdc = lines[4]["refunds"][0]
     check(usdc["asset"] == "USDC" and usdc["asset_issuer"] == HOST
           and usdc["uri"] == refund_uri(r.cfg, a, Decimal(2), underpaid, "USDC", HOST),
@@ -1352,10 +1357,17 @@ def test_refunds_due(tmp: Path) -> None:
           and len(st.refunds_due) == n and r2.records()[-1]["kind"] == "orphan" and r2.st.refunds_due == [],
           "no memo, or a memo naming none of this station's sessions: an orphan for the host to judge by hand, never "
           "a refund due (the host's own top-up from an exchange, say), nor on another station sharing the host key")
+    look = account(9)
+    paid_by(r, look, "0.0001000", memo=sid)  # a look-alike of b, the memo of b's payment copied from the ledger
+    paid_by(r, look, "0.0001000")  # the live session's memo
+    check([(x["kind"], "refunds" in x) for x in r.records()[-2:]] == [("orphan", False), ("underpaid", False)]
+          and len(st.refunds_due) == n,
+          "below 1 ficha with a closed or the live session's memo (a look-alike's poisoning payment): logged, "
+          "never a refund due")
     before = owed(st)
     check(before == [(sid, a, "1.5888888", "XLM"), (sid, b, "2.0277777", "XLM"), (tx_ref, a, "1", "XLM"),
-                     (underpaid, b, "0.5", "XLM"), (sid, b, "0.3", "XLM"), (underpaid, a, "2", "USDC")],
-          "pending: the session's two and the four uncredited ones, never the dust")
+                     (sid, b, "1.3", "XLM"), (underpaid, a, "2", "USDC")],
+          "pending: the session's two and the three uncredited ones, never below 1 ficha, never the dust")
     st2 = r.station(MockRelay())
     check(owed(st2) == before and st2.refunds_due[-1]["asset_issuer"] == HOST,
           "after a restart the station owes exactly the same, rebuilt from the log")
