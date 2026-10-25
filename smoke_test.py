@@ -1655,6 +1655,12 @@ def test_refund_screen(tmp: Path) -> None:
                                destination=b))
     check(r.snap()["refund_due"]["ref"] == first and r.snap()["refund_due"]["count"] == 1,
           "paid off: the one before it shows")
+    st.refunds_due.append(dict(st.refunds_due[-1], left=Decimal("0.25")))  # a second refund under the same REF
+    due = r.snap()["refund_due"]
+    check(due["amount"] == "1.75" and due["uri"] == refund_uri(r.cfg, a, Decimal("1.75"), first) and due["count"] == 2,
+          "two refunds due under one REF to one payer: the card asks for both at once (one payment pays the pool, "
+          "and /refund signs one refund per REF, so a remainder on its own could not be paid there)")
+    st.refunds_due.pop()
     r.tick(30)
     left = r.snap()["refund_due"]["seconds_left"]
     r.tick(30)

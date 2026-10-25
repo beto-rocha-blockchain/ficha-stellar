@@ -2481,6 +2481,11 @@ class Station:
         receipt, turn, turns = self._shown_receipt() if waiting else (None, 0, 0)
         due = self.refunds_due[-1] if self.refunds_due and not self.cfg.custody else None
         refund_shown = due is not None and self._refund_shown()
+        # The whole pool under the newest refund's REF, to its payer: one
+        # payment pays it all (_pay_off), and /refund signs only one refund
+        # per REF, so a remainder shown on its own could not be paid there.
+        due_left = sum((e["left"] for e in self._owed(due["ref"], due["payer"], due["asset"], due["asset_issuer"])),
+                       Decimal(0)) if due else Decimal(0)
         return {
             "state": self.state.value,
             "session_id": s.id,
@@ -2540,9 +2545,9 @@ class Station:
             # pays that (main.py adds its QR) and the seconds it still shows.
             "refund_due": ({"count": len(self.refunds_due), "unseen": self._refunds_unseen(),
                             "seconds_left": int(math.ceil(self.refund_shown_until - now)) if refund_shown else None,
-                            **({"ref": due["ref"], "payer": due["payer"], "amount": format_amount(due["left"]),
+                            **({"ref": due["ref"], "payer": due["payer"], "amount": format_amount(due_left),
                                 "asset": due["asset"], "asset_issuer": due["asset_issuer"],
-                                "uri": refund_uri(self.cfg, due["payer"], due["left"], due["ref"], due["asset"],
+                                "uri": refund_uri(self.cfg, due["payer"], due_left, due["ref"], due["asset"],
                                                   due["asset_issuer"])} if refund_shown else {})} if due else None),
         }
 
