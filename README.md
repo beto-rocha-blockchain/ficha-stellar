@@ -568,9 +568,9 @@ app, the signed registry, FichaEscrow and custody mode on testnet (30
 September to 2 October), and [public safety mode](#public-safety-mode)
 (23 October, off by default; the station's side, and the router's scripts
 tested in WSL). The public repository's first commit, tagged
-`pre-hackmeridian`, is the state of 23 October 2026. The commits after it
-dated 23 October (the station on the testnet's Stellar RPC 30, verified
-charging under load, public safety mode, the demo video) and two testnet
+`pre-hackmeridian`, is the state of 23 October 2026 (the station already on
+the testnet's Stellar RPC 30). The commits after it dated 23 October
+(verified charging under load, public safety mode, the demo video) and two testnet
 fee fixes on the morning of 25 October, before the hacking began, are
 pre-event work too.
 
