@@ -3,7 +3,13 @@
 Ficha is pay-per-minute phone charging on Stellar. The payer's deposit waits
 in a Soroban escrow with no admin; the station, which holds no key, proves
 with a hash chain how many minutes it did not deliver, and the payer claims
-them back. **Everything runs on testnet.**
+them back.
+
+**Direct payments run on Stellar mainnet** (station `8DY7RJ`, since
+HackMeridian, 25 October 2026); **custody, the escrow and its refund, runs
+on testnet** until the contract is audited. Section 1 is the testnet
+custody demo; section 2 starts with mainnet, which you can check without a
+wallet.
 
 ## 1. Pay a station (2 minutes)
 
@@ -28,7 +34,18 @@ registry.
 
 ## 2. Check it on the ledger (1 minute)
 
-- The contract: [`CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC`](https://stellar.expert/explorer/testnet/contract/CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC)
+- **On mainnet**, direct mode: station `8DY7RJ`'s first payment,
+  [`958e7ab6…`](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a)
+  on stellar.expert: 1 XLM for 2 fichas from the Ficha app's wallet
+  straight to the venue's account
+  [`GDVPPO2J…JK6ZCN`](https://stellar.expert/explorer/public/account/GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN),
+  memo `8DY7RJ.FAFXJXBZ`, fee 100 stroops, on 25 October 2026. The station
+  credited it, passed its probe and charged 120 s of the 120 s paid. That
+  account is the one the signed public registry lists for `8DY7RJ`:
+  `python tools/registry.py verify --file registry/stations.public.json --key GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG`
+  prints `OK`. The record, and what is still pending (the first live
+  refund on mainnet): [docs/mainnet-run.md](../mainnet-run.md).
+- On testnet, the contract: [`CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC`](https://stellar.expert/explorer/testnet/contract/CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC)
   on stellar.expert. Its wasm sha256 is
   `d4314635246e3a17b65d154bd8bae208a94a2594741ed12f3a24198d1e9bd865`;
   `stellar contract build` in `contracts/escrow` with rustc 1.98.1 (target
@@ -60,6 +77,9 @@ registry.
 | Its invariants as tests | [`contracts/escrow/src/test.rs`](../../contracts/escrow/src/test.rs), [`test_spec.rs`](../../contracts/escrow/src/test_spec.rs), [`test_footprint.rs`](../../contracts/escrow/src/test_footprint.rs) (a venue that changes its account cannot fail a claim) |
 | A smart-account payer: a contract account whose `__check_auth` checks a secp256r1 (passkey curve) signature pays, tops up and claims | [`contracts/escrow/src/test_account.rs`](../../contracts/escrow/src/test_account.rs) |
 | The station's hash chain, pay link and escrow watcher (no key) | [`escrow.py`](../../escrow.py) |
+| Mainnet guards on the station: no simulated hardware or payments, no unchecked registry, no testnet key, only an https Horizon that serves the public network | [`config.py`](../../config.py) (`validate_public`), [`registry_check.py`](../../registry_check.py), [`stellar.py`](../../stellar.py) |
+| Mainnet checks in the app: no unlisted host, no QR without a station code, a pay screen that blocks any result it does not know | [`app/src/pay/check.ts`](../../app/src/pay/check.ts) |
+| Refunds signed by the venue in direct mode: the station's refund due and the `/refund` page | [`session.py`](../../session.py), [`app/src/routes/refund.tsx`](../../app/src/routes/refund.tsx), [`app/src/refund/`](../../app/src/refund/) |
 | Paid time counted only while probes prove charging | [`session.py`](../../session.py) |
 | The app's deposit and claim: simulate, check the authorization, sign on the phone | [`app/src/custody/`](../../app/src/custody/) |
 | Host mode, the venue's side: terms, release, refunds, collecting what the contract holds for it (`pay_host`) | [`app/src/custody/host.ts`](../../app/src/custody/host.ts) |
@@ -72,11 +92,15 @@ WSL).
 
 ## What is real, and what is not
 
-- Real: the testnet transactions, the contract, the signed registry, the
-  app, the relay switching a charger, the meter and the probes.
-- Not: real money (test XLM only), switched mains (the demo switches 5 V),
-  an audit (custody stays on testnet; mainnet stations take direct SEP-7
-  payments). The meter reads the phone's own battery over ADB, so the phone
-  being charged at the demo is ours; your phone pays.
-- Built before HackMeridian, entered in the Scale path: see the README's
-  status section.
+- Real: a mainnet payment of real XLM to the venue, credited by station
+  `8DY7RJ`; the testnet transactions, the contract, the signed registries,
+  the app, the relay switching a charger, the meter and the probes.
+- Not yet: a refund on mainnet (the venue-signed refund flow is built and
+  tested in simulation; the first live one is pending), switched mains
+  (the demo switches 5 V), an audit (custody stays on testnet; mainnet
+  stations take direct SEP-7 payments). The meter reads the phone's own
+  battery over ADB, so the phone being charged at the demo is ours; your
+  phone pays.
+- Scale path: the product was built before HackMeridian; the mainnet
+  migration was built at the event, in the commits after 25 October
+  12:00 Lisbon time. See the README's status section.
