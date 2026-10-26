@@ -96,7 +96,11 @@ answer only to the laptop, which is where both windows are.
   charge runs. The payment turns it into the paid session, as after a
   courtesy minute: the relay stays closed, then the usual probe.
 
-**Plan R, the real router (the event's milestone).** Once steps 1 to 5 of
+**Plan R, the real router.** Not run at HackMeridian: the router milestone
+was dropped, and the event's work is the mainnet migration
+([README, status](../../README.md#status-hackmeridian-2026-scale-path)); the
+router's side is still tested in WSL only, on a fake router. At a later
+event: once steps 1 to 5 of
 [openwrt/README.md](../../openwrt/README.md) pass at the table, switch the
 station to the router between two judges: stop it, set the `.env` lines of
 [operators.md, section 3](../operators.md#free-emergency-minutes)
@@ -118,9 +122,7 @@ measured phone on the router's Wi-Fi.
 4. Tell judges before they tap: their phone gets its free minutes once that
    day.
 
-Write down what passed, in a small dated commit after the
-`pre-hackmeridian` tag: the router running the free minutes at the table is
-the work done at the event.
+Write down what passed, in a small dated commit.
 
 ## Questions to expect
 
@@ -130,7 +132,7 @@ the work done at the event.
 | How does the venue get its money? | At the deadline, a release pays it at once. A claim keeps the venue's share in the contract, owed to that venue alone, so nothing the venue does to its account can fail the payer's refund; the venue's phone collects everything owed with one `pay_host` (host mode's **Collect** button). Anyone may send it; it pays only the venue. |
 | What if the venue alters the station? | It could reveal fewer unused units: the station's measurement is trusted, as any meter is. Nobody else can cut the refund it grants, the venue included. Next: the payer's app as a witness of the probes, then a metered outlet with an attestation key. |
 | Why does the station need no key? | Everything it must know is public: deposits are contract events it reads through a Soroban RPC. Its only secret is a random seed per session, which signs nothing. |
-| Why not mainnet? | The contract is not audited. On mainnet a station takes direct SEP-7 payments to the venue, which work today with any wallet. |
+| Is it on mainnet? | Direct payments are: station `8DY7RJ` since 25 October 2026, a SEP-7 payment straight to the venue that any wallet makes. Custody stays on testnet until the contract is audited. |
 | Could another wallet steal the session? | A session is its ID plus the anchor. A deposit with another chain is another session the station ignores. A copy of the exact QR can be paid first; the real payer is stopped before signing, and the copier only pays fees. |
 | Can it run in euros? | Direct mode takes any Stellar asset today. The escrow moves any asset's SAC, but custody stations use XLM only for now: an asset's issuer could freeze a payer or claw back the escrow's balance, so EURC in custody needs an allowlist of issuers first. EURC and a SEPA anchor are on the roadmap; the MiCA framing of an escrow with no admin is still to be checked. |
 | Unit economics? | Not measured yet. The demo prices are testnet placeholders. |
