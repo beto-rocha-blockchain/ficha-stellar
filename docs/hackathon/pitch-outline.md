@@ -32,8 +32,9 @@ rests on the same Stellar pieces, and leads into the markets of slide 11.
 
 ### 1. Ficha: phone charging by the minute, on Stellar
 
-- The mark (a coin with the pins of a Schuko plug), the TESTNET badge, the
-  app's address.
+- The mark (a coin with the pins of a Schuko plug), the README's two
+  badges (Stellar mainnet: direct payments; custody: testnet until
+  audited), the app's address.
 - Notes: "In Portugal a ficha is a plug; in Brazil, the token for a public
   phone. Ficha is both: a token of charging time at a plug in a public
   place."
