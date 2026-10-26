@@ -135,8 +135,8 @@ the Stellar endpoints it uses are open on that Wi-Fi before any sign-in.
   each phone in once a day). The 2 minutes of internet are a courtesy for an
   ordinary phone, not a hard limit.
 - Off by default (`WIFI_PORTAL=off`). The demo `.env` examples turn it on as
-  a simulation on the laptop; the router's side is tested in WSL and first
-  runs on the real router at HackMeridian.
+  a simulation on the laptop; the router's side is tested in WSL, on a
+  fake router.
 - **Ficha is not an emergency service and does not replace one.**
 
 Why, how, privacy, abuse and honest limits, who can fund the free minutes,
@@ -487,7 +487,7 @@ Wiring of both topologies, the probe rules and every setting:
 | The station's custody mode against the contract, with real deposits from the app | The recorded custody runs used `MOCK=true`: simulated relay and phone (`.env.lisbon.example`). Real hardware was verified in direct mode |
 | | The ADB meter needs USB debugging on the measured phone: a demo meter, not one for the public. A meter at the outlet is roadmap |
 | | No audit; custody is testnet only. A smart-account payer is tested in the contract's tests (a secp256r1 account contract), not on testnet; the app's wallet is a `G…` key |
-| Public safety mode, the station's side: the Wi-Fi's page in English and Portuguese, the free charge on the relay, the daily salted ledger, the emergency numbers on the screen (smoke-tested, and run on a simulated station) | Its router's side (`openwrt/`: openNDS, `binauth.sh`, `setup.sh`) is tested in WSL on a fake router only; it first runs on the real router at the event. Without the router (`WIFI_PORTAL=simulate`) free internet is written down, not given, and the screen and the page say SIMULATED |
+| Public safety mode, the station's side: the Wi-Fi's page in English and Portuguese, the free charge on the relay, the daily salted ledger, the emergency numbers on the screen (smoke-tested, and run on a simulated station) | Its router's side (`openwrt/`: openNDS, `binauth.sh`, `setup.sh`) is tested in WSL on a fake router only. Without the router (`WIFI_PORTAL=simulate`) free internet is written down, not given, and the screen and the page say SIMULATED |
 
 ## Adoption and market
 
@@ -730,8 +730,8 @@ charges, 7 custody mode.
   reuses K session entries instead of renting a new one per session, so a
   deposit stops paying a new entry's rent.
 - **Before custody on mainnet:** an audit of FichaEscrow.
-- **Public safety mode, next.** The router's side on the real router (at
-  the event); **sponsored fichas** on the ledger, so a venue, a city, an NGO
+- **Public safety mode, next.** The router's side on the real router;
+  **sponsored fichas** on the ledger, so a venue, a city, an NGO
   or a sponsor can pay for the free emergency minutes and see on the ledger
   how many it paid for (not built: the escrow has no sponsor deposit yet);
   a hard limit on the free internet (the app and the Stellar endpoints on
