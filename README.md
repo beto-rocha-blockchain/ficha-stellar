@@ -70,7 +70,7 @@ in **direct mode**, which predates the event; what the event added is in
   Horizon with no key, credits the payment, and counts time only while its
   probe proves the phone charges from it.
 - **The first session**, 25 October 2026, 17:55 UTC: 1 XLM for 2 fichas
-  from the Ficha app's wallet,
+  from our own wallet in the Ficha app (a self-test with real XLM),
   [transaction `958e7ab6…`](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a)
   (memo `8DY7RJ.FAFXJXBZ`, fee 100 stroops); probe passed, 120 s charged
   of 120 paid, verdict `delivered`, peak 2 762 mA, 0.354 Wh, the cut

@@ -37,8 +37,8 @@ registry.
 
 - **On mainnet**, direct mode: station `8DY7RJ`'s first payment,
   [`958e7ab6…`](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a)
-  on stellar.expert: 1 XLM for 2 fichas from the Ficha app's wallet
-  straight to the venue's account
+  on stellar.expert: 1 XLM for 2 fichas from our own wallet in the Ficha
+  app (a self-test with real XLM) straight to the venue's account
   [`GDVPPO2J…JK6ZCN`](https://stellar.expert/explorer/public/account/GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN),
   memo `8DY7RJ.FAFXJXBZ`, fee 100 stroops, on 25 October 2026. The station
   credited it, passed its probe and charged 120 s of the 120 s paid. That

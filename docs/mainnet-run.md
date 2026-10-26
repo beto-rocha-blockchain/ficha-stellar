@@ -17,7 +17,7 @@ and none is needed to check it.
 | Venue (host) account | [`GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN`](https://stellar.expert/explorer/public/account/GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN); its key is the owner's, and the station knows only this public key |
 | Terms | native XLM, 0.5 XLM per 1-minute ficha, up to 10 minutes |
 | Registry | [`registry/stations.public.json`](../registry/stations.public.json), issued `2026-10-25T15:50:00Z`, signed by the public registry key `GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG`, which `config.py`, `app/src/config.ts` and [the spec, section 2](station-app-contract.md#2-station-registry) pin; published with the site at <https://ficha-stellar.vercel.app/registry/stations.public.json> (+ `.sig`), the same bytes |
-| Payer | the Ficha app's wallet, [`GDXV6M2HI5HRWNSDMNN6X4AABXCYAMAO2347BIMJT5CFB3UQOL2I627D`](https://stellar.expert/explorer/public/account/GDXV6M2HI5HRWNSDMNN6X4AABXCYAMAO2347BIMJT5CFB3UQOL2I627D), on Mainnet |
+| Payer | our own wallet in the Ficha app, [`GDXV6M2HI5HRWNSDMNN6X4AABXCYAMAO2347BIMJT5CFB3UQOL2I627D`](https://stellar.expert/explorer/public/account/GDXV6M2HI5HRWNSDMNN6X4AABXCYAMAO2347BIMJT5CFB3UQOL2I627D), on Mainnet: a self-test with real XLM, not an outside customer |
 
 ## Settings
 
