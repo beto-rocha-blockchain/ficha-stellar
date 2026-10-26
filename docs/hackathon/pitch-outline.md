@@ -122,8 +122,10 @@ rests on the same Stellar pieces, and leads into the markets of slide 11.
   and SEP-24 to buy balance through an anchor; SEP-5 non-custodial wallet;
   a registry signed with a Stellar key; Friendbot on testnet.
 - Notes: without a ledger and a contract, prepaid time needs someone to hold
-  the money. Fees measured on testnet: a deposit about 0.036 XLM (mostly
-  rent), a claim about 0.0024 XLM.
+  the money. Fees measured on testnet on 2 October 2026: a deposit about
+  0.036 XLM (mostly rent), a claim about 0.0024 XLM; testnet's resource
+  fees then surged (a deposit simulated at 2.23 XLM on 25 October). On
+  mainnet, the first direct payment's fee was 100 stroops (0.00001 XLM).
 
 ### 10. A charging point that can save a call
 
@@ -144,8 +146,8 @@ rests on the same Stellar pieces, and leads into the markets of slide 11.
 - Notes: say plainly that Ficha is not an emergency service and does not
   replace one; that the 2 minutes of internet are a courtesy for an
   ordinary phone, not a hard limit (shared hosting addresses, phones that
-  change their MAC address); and that the router's side runs on the real
-  router for the first time at the event. Who pays for the free minutes:
+  change their MAC address); and that the router's side is tested in WSL,
+  on a fake router. Who pays for the free minutes:
   the venue today (a free charge is a fraction of a cent of electricity, an
   estimate); a city, an NGO or a sponsor next; sponsored fichas on the
   ledger are on the roadmap, not built. Sources: `docs/public-safety.md`,
@@ -160,16 +162,21 @@ rests on the same Stellar pieces, and leads into the markets of slide 11.
 - Notes: the MiCA framing of an escrow with no admin has not been checked
   yet; say so if asked.
 
-### 12. Built before the event, and what it took
+### 12. Built before the event, and at it
 
-- Scale path: the whole product was built before HackMeridian, from 28
+- Scale path: the product was built before HackMeridian, from 28
   September 2026. The public repository's first commit is tagged
-  `pre-hackmeridian`; anything done at the event comes after it.
-- Tests: 574 station checks, 336 app tests, 37 contract tests, and 61 + 83
-  checks of the router's scripts (23 October).
-- Public safety mode, built on 23 October and off by default; its router
-  side set up on the real router at the table is the event's milestone,
-  in dated commits after the tag.
+  `pre-hackmeridian` (23 October); the event's work is in the commits
+  after 25 October, 12:00 Lisbon time.
+- At the event: Ficha on Stellar mainnet, in direct mode. Station `8DY7RJ`
+  in a signed public registry; its first real session on 25 October (1 XLM
+  for 2 fichas, transaction `958e7ab6…` on stellar.expert); the station's
+  and the app's guards for real money; refunds signed by the venue, built
+  and tested in simulation, the first live one still to come. Custody
+  stays on testnet until an audit.
+- Tests: 681 station checks and 385 app tests (26 October), 37 contract
+  tests and 61 + 83 checks of the router's scripts (23 October).
+- Public safety mode, built on 23 October and off by default.
 - Testnet: recorded runs with every transaction linked (deposit, top-up,
   claim, `pay_host`, release, a squatter's session kept apart,
   `TermsChanged` before signing).
