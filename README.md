@@ -696,7 +696,7 @@ charges, 7 custody mode.
 | `registry/`, `registry_format.py`, `registry_check.py`, `tools/registry.py` | the signed station registry: the file, its format, the station's self-check, the offline signing tool |
 | `contracts/escrow/` | FichaEscrow (Soroban), its tests and the shared test vectors |
 | `app/` | the Ficha app: React PWA, Android through Capacitor |
-| `docs/` | the spec, the architecture, the operator guide, the testnet runs, the hackathon package |
+| `docs/` | the spec, the architecture, the operator guide, the testnet runs, the first mainnet run, the hackathon package |
 | `brand/` | the logo |
 
 ## Roadmap
@@ -752,6 +752,7 @@ charges, 7 custody mode.
 | [docs/free-minutes.md](docs/free-minutes.md) | public safety mode on the station: the Wi-Fi's page, identity, settings |
 | [openwrt/README.md](openwrt/README.md) | public safety mode on the router: setup at the event, the walled garden, rollback |
 | [docs/testnet-e2e.md](docs/testnet-e2e.md) | recorded testnet runs, every transaction linked |
+| [docs/mainnet-run.md](docs/mainnet-run.md) | the first mainnet run: settings, steps, the transaction, the station's log, what is pending |
 | [contracts/escrow/README.md](contracts/escrow/README.md) | the contract's build, deployment, CLI calls and upkeep |
 | [app/README.md](app/README.md) | the app: routes, modules, key protection, Android |
 | [docs/hackathon/](docs/hackathon/) | demo script, video storyboard, pitch outline, checklists |
