@@ -553,26 +553,63 @@ before any claim of eligibility:
   the station, the registry tool and the app refuse custody on the public
   network.
 
-## Status: built before HackMeridian, Scale path
+## Status: HackMeridian 2026, Scale path
 
 Ficha is entered in the **Scale** path of HackMeridian 2026 (Lisbon, 25–26
 October), which takes an existing product toward production (Prototype →
-Product); a Scale project picks no track. Everything in this repository was
-built before the event: the first commit is from 28 September 2026, the
-escrow contract and custody mode from 30 September to 2 October 2026. A
-station fix on 23 October 2026 keeps it reading the testnet RPC after the
-RPC's move to Stellar RPC 30 (`requirements.txt` asks for Python
-stellar-sdk 16.1.1 or later). [Public safety mode](#public-safety-mode) was
-added on 23 October 2026 too, off by default: the station's side, and the
-router's scripts, tested in WSL. Setting it up on the real router is work
-for the event.
+Product); a Scale project picks no track.
 
-The test suites, as they printed on 23 October 2026:
+**Built before the event**, from 28 September 2026: the station, the Ficha
+app, the signed registry, FichaEscrow and custody mode on testnet (30
+September to 2 October), and [public safety mode](#public-safety-mode)
+(23 October, off by default; the station's side, and the router's scripts
+tested in WSL). The public repository's first commit, tagged
+`pre-hackmeridian`, is the state of 23 October 2026. The commits after it
+dated 23 October (the station on the testnet's Stellar RPC 30, verified
+charging under load, public safety mode, the demo video) and two testnet
+fee fixes on the morning of 25 October, before the hacking began, are
+pre-event work too.
+
+**Built at the event**, in the commits after 25 October 2026, 12:00
+Lisbon time: **Ficha on Stellar mainnet, in direct mode**
+([Live on mainnet](#live-on-mainnet)).
+
+- The station's guards on the public network: it refuses simulated
+  hardware or payments, an unchecked registry, the testnet demo's keys,
+  and a Horizon that is not https or serves another network; it hides the
+  pay QR while Horizon is failing, re-reads its registry entry every
+  minute, and shows a MAINNET, real XLM banner.
+- The app's guards: a SEP-7 QR without a network passphrase is a mainnet
+  request; on Mainnet, no payment to a host the signed registry does not
+  list, or to a QR without a station code; a confirmation before switching
+  to Mainnet; a pay screen that blocks any check result it does not know.
+- A signed public registry, `registry/stations.public.json`, with station
+  `8DY7RJ`, signed by the public registry key the station, the app and the
+  spec pin.
+- Refunds signed by the venue in direct mode: the refund due on the
+  operator's R key, as a SEP-7 QR and a **Refund with Freighter** button;
+  the site's `/refund` page, which checks the registry and the venue's
+  ledger before Freighter signs; the station marking it refunded when it
+  sees the venue's payment with the memo `refund <REF>`.
+- Address-poisoning defenses: `dust` lines that are never a refund due,
+  and a refund's destination taken only from the log.
+- Secret hygiene: a stricter `.gitignore` (every env file, key, keystore
+  and session log, under any name), and a site that publishes only signed
+  registries, checked at build and publish.
+- The first real mainnet session, on 25 October at 17:55 UTC
+  ([docs/mainnet-run.md](docs/mainnet-run.md)). The first live refund on
+  mainnet is still to come.
+
+The escrow contract and the router's scripts did not change at the event,
+and the testnet custody demo (`YX3DGE`, the video) runs as before.
+
+The test suites, as they printed on 26 October 2026 (the contract's and
+the router's on 23 October; neither changed since):
 
 | Part | Suite | Result |
 |---|---|---|
-| Station | `python smoke_test.py` | 574 checks pass |
-| App | `npm test` in `app/` | 336 tests pass; 5 opt-in testnet tests skipped by default |
+| Station | `python smoke_test.py` | 681 checks pass |
+| App | `npm test` in `app/` | 385 tests pass; 5 opt-in testnet tests skipped by default |
 | Contract | `cargo test` in `contracts/escrow` | 37 tests pass |
 | Router scripts | `sh openwrt/test-binauth.sh` and `sh openwrt/test-setup.sh` (WSL or Linux, busybox) | 61 and 83 checks pass |
 
@@ -584,13 +621,13 @@ demo's flow at `YX3DGE` (deposit, top-up, the E key, claim) and ESC on the
 bench station `ERZGCG`, after the testnet RPC moved to Stellar RPC 30; and
 runs J to L (2 October 2026), the demo's flow with `pay_host` collecting
 the venue's share (J), ESC on the bench (K), and a deadline kept in ledger
-time followed by a release (L).
+time followed by a release (L). The first mainnet run, a direct payment of
+real XLM: [docs/mainnet-run.md](docs/mainnet-run.md).
 
-**Commit and tag plan.** The public repository starts with a fresh history
-([docs/hackathon/public-release.md](docs/hackathon/public-release.md)). Its
-first commit is tagged `pre-hackmeridian`: the state brought to the event.
-Anything changed during the event comes after that tag, in small dated
-commits, so the judges can see exactly what was done there.
+The public repository started with a fresh history
+([docs/hackathon/public-release.md](docs/hackathon/public-release.md)); its
+commits are dated, so what was done at the event is the commits after 25
+October 2026, 12:00 Lisbon time.
 
 ## Run it locally
 
