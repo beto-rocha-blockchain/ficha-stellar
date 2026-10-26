@@ -1,9 +1,10 @@
 # Ficha for judges: the 5-minute tour
 
-Ficha is pay-per-minute phone charging on Stellar. The payer's deposit waits
-in a Soroban escrow with no admin; the station, which holds no key, proves
-with a hash chain how many minutes it did not deliver, and the payer claims
-them back.
+Ficha is pay-per-minute phone charging on Stellar, and the station holds no
+key. In direct mode the payer pays the venue straight, and the venue signs
+any refund. In custody mode the payer's deposit waits in a Soroban escrow
+with no admin; the station proves with a hash chain how many minutes it did
+not deliver, and the payer claims them back.
 
 **Direct payments run on Stellar mainnet** (station `8DY7RJ`, since
 HackMeridian, 25 October 2026); **custody, the escrow and its refund, runs
