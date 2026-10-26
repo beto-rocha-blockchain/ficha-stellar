@@ -7,10 +7,12 @@
 
 # Ficha
 
-**Pay-per-minute phone charging, paid on Stellar. The payer's money waits in
-a Soroban escrow with no admin; the station proves, with a hash it reveals,
+**Pay-per-minute phone charging, paid on Stellar. The station holds no key.
+On mainnet, any Stellar wallet pays the venue straight (direct mode). In
+custody mode, on testnet until audited, the payer's money waits in a
+Soroban escrow with no admin; the station proves, with a hash it reveals,
 how many minutes it did not deliver, and the payer gets those back with one
-tap on the receipt, before a deadline. The station holds no key.**
+tap on the receipt, before a deadline.**
 
 ![Stellar mainnet: direct payments](https://img.shields.io/badge/Stellar_mainnet-direct_payments-66E619?style=flat-square)
 ![Custody: testnet until audited](https://img.shields.io/badge/custody-testnet_until_audited-F5A623?style=flat-square)
@@ -214,8 +216,10 @@ with the demo station `YX3DGE`:
   socket, or stopped charging, nobody gives the unused money back.
 
 Ficha: scan, pay a few fichas from a wallet on your phone, and pay only for
-the time this station was verified to be charging your phone. The venue
-receives the money. Ficha, the operator, never holds it.
+the time this station was verified to be charging your phone: the rest
+comes back by your own claim on the escrow (custody, on testnet) or by a
+refund the venue signs (direct, on mainnet). The venue receives the money.
+Ficha, the operator, never holds it.
 
 ## How it works
 
@@ -497,7 +501,8 @@ Wiring of both topologies, the probe rules and every setting:
 - **Who pays:** people whose phone runs low away from home, at a café, a
   coworking space or an event. They scan a QR and pay a few fichas from a
   wallet on their own phone, with no account with Ficha and no card, and
-  the time they did not use comes back.
+  the time they did not use comes back: by their own claim in custody, by
+  a refund the venue signs in direct mode.
 - **Who earns:** the venue, which sells minutes of a socket it already
   has. Direct mode pays it straight to its own Stellar account; custody
   pays it through the contract. There is no card terminal and no card fee
