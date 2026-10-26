@@ -23,7 +23,7 @@ charging with no mobile data**.
 | Money | none moves for a free minute: it is a courtesy, like the operator's free courtesy minute |
 | Keys | the station still holds no Stellar key, and no router password either |
 | Default | off (`WIFI_PORTAL=off`): a station without these settings behaves exactly as before |
-| Status | the station side is built and tested; the router side (OpenWrt and openNDS) is tested in WSL on a fake router, and first runs on the real router at HackMeridian, the event's milestone |
+| Status | the station side is built and tested; the router side (OpenWrt and openNDS) is tested in WSL on a fake router, and has not run on the real router yet |
 
 The station's side in detail: [free-minutes.md](free-minutes.md). The
 router's: [openwrt/README.md](../openwrt/README.md). The settings:
@@ -151,8 +151,8 @@ nothing given. The page and the station screen say SIMULATED. The demo
 **Without internet** (the router's uplink down), payments and the free
 internet cannot work. The page itself needs nothing from the internet and
 the free charge needs only the station and its relay; whether openNDS still
-sends phones to the page with its uplink down is to be checked on the router
-at the event.
+sends phones to the page with its uplink down is to be checked on the real
+router.
 
 ## Privacy by design
 
@@ -259,7 +259,6 @@ What stops one person from taking what is meant for everyone:
   ([openwrt/README.md](../openwrt/README.md#4-the-station-on-its-fixed-address-3-min)).
 - **Not yet on a real router.** `binauth.sh` and `setup.sh` are tested in
   WSL with busybox, on a fake router; openNDS itself has not run them yet.
-  Setting up the real router at the table is the event's milestone.
 
 ## Who can fund the free minutes
 
@@ -386,7 +385,7 @@ WSL or Linux with busybox, `sh openwrt/test-binauth.sh` (61 checks) and
 
 Not built; in order:
 
-1. **The real router at the event**: `openwrt/setup.sh` on the travel
+1. **The real router**: `openwrt/setup.sh` on the travel
    router, a phone through the whole visit above.
 2. **Sponsored fichas on the ledger** ([above](#who-can-fund-the-free-minutes)).
 3. **A hard limit on the free internet**: the app and the Stellar endpoints
