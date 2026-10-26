@@ -168,8 +168,8 @@ rests on the same Stellar pieces, and leads into the markets of slide 11.
   September 2026. The public repository's first commit is tagged
   `pre-hackmeridian` (23 October); the event's work is in the commits
   after 25 October, 12:00 Lisbon time.
-- At the event: Ficha on Stellar mainnet, in direct mode. Station `8DY7RJ`
-  in a signed public registry; its first real session on 25 October (1 XLM
+- At the event: the mainnet migration of direct mode, which predates the
+  event. Station `8DY7RJ` in a signed public registry; its first real session on 25 October (1 XLM
   for 2 fichas, transaction `958e7ab6…` on stellar.expert); the station's
   and the app's guards for real money; refunds signed by the venue, built
   and tested in simulation, the first live one still to come. Custody

@@ -55,8 +55,9 @@ place, a café, a coworking space, an event.
 
 ## Live on mainnet
 
-Built at HackMeridian (25–26 October 2026): Ficha on the Stellar public
-network, in **direct mode**.
+Taken to the Stellar public network at HackMeridian (25–26 October 2026),
+in **direct mode**, which predates the event; what the event added is in
+[the status section](#status-hackmeridian-2026-scale-path).
 
 - **What runs.** Station `8DY7RJ`, listed in the signed public registry
   for 25–26 October 2026, on the bench hardware (the relay, the charger,
@@ -564,25 +565,29 @@ October), which takes an existing product toward production (Prototype →
 Product); a Scale project picks no track.
 
 **Built before the event**, from 28 September 2026: the station, the Ficha
-app, the signed registry, FichaEscrow and custody mode on testnet (30
-September to 2 October), and [public safety mode](#public-safety-mode)
-(23 October, off by default; the station's side, and the router's scripts
-tested in WSL). The public repository's first commit, tagged
-`pre-hackmeridian`, is the state of 23 October 2026 (the station already on
-the testnet's Stellar RPC 30). The commits after it dated 23 October
-(verified charging under load, public safety mode, the demo video) and two testnet
-fee fixes on the morning of 25 October, before the hacking began, are
-pre-event work too.
+app, the signed registry, direct mode (the SEP-7 pay QR, Horizon memo
+matching, and a public-network setting that refused custody, simulated
+payments, unverified charging and the testnet's Horizon, with no public
+registry key pinned and no station on mainnet), FichaEscrow and custody
+mode on testnet (30 September to 2 October), and
+[public safety mode](#public-safety-mode) (23 October, off by default; the
+station's side, and the router's scripts tested in WSL). The public
+repository's first commit, tagged `pre-hackmeridian`, is the state of 23
+October 2026 (the station already on the testnet's Stellar RPC 30). The
+commits after it dated 23 October (verified charging under load, public
+safety mode, the demo video) and two testnet fee fixes on the morning of
+25 October, before the hacking began, are pre-event work too.
 
 **Built at the event**, in the commits after 25 October 2026, 12:00
-Lisbon time: **Ficha on Stellar mainnet, in direct mode**
-([Live on mainnet](#live-on-mainnet)).
+Lisbon time: **the migration of direct mode to Stellar mainnet**, what the
+station and the app need before real money moves, and the first station
+on mainnet ([Live on mainnet](#live-on-mainnet)).
 
 - The station's guards on the public network: it refuses simulated
-  hardware or payments, an unchecked registry, the testnet demo's keys,
-  and a Horizon that is not https or serves another network; it hides the
-  pay QR while Horizon is failing, re-reads its registry entry every
-  minute, and shows a MAINNET, real XLM banner.
+  hardware (`MOCK=true`), an unchecked registry, the testnet demo's keys,
+  and a Horizon that is not https or does not say it serves the public
+  network; it hides the pay QR while Horizon is failing, re-reads its
+  registry entry every minute, and shows a MAINNET, real XLM banner.
 - The app's guards: a SEP-7 QR without a network passphrase is a mainnet
   request; on Mainnet, no payment to a host the signed registry does not
   list, or to a QR without a station code; a confirmation before switching

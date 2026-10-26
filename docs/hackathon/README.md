@@ -2,8 +2,10 @@
 
 Ficha at HackMeridian 2026 (Lisbon, 25–26 October), Scale path.
 
-The event's work: **Ficha on Stellar mainnet, in direct mode.** Station
-`8DY7RJ` is in the signed public registry, and its first real session, on
+The event's work: **the mainnet migration.** Direct mode (a SEP-7 payment
+straight to the venue) predates the event; at it, it got the guards, the
+signed public registry and the venue-signed refunds that real money needs.
+Station `8DY7RJ` is in that registry, and its first real session, on
 25 October 2026, is
 [on stellar.expert](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a)
 and recorded in [docs/mainnet-run.md](../mainnet-run.md); the first live
