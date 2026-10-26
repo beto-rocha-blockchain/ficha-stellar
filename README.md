@@ -12,7 +12,8 @@ a Soroban escrow with no admin; the station proves, with a hash it reveals,
 how many minutes it did not deliver, and the payer gets those back with one
 tap on the receipt, before a deadline. The station holds no key.**
 
-![Stellar testnet](https://img.shields.io/badge/Stellar-TESTNET-66E619?style=flat-square)
+![Stellar mainnet: direct payments](https://img.shields.io/badge/Stellar_mainnet-direct_payments-66E619?style=flat-square)
+![Custody: testnet until audited](https://img.shields.io/badge/custody-testnet_until_audited-F5A623?style=flat-square)
 ![Soroban contract](https://img.shields.io/badge/contract-Soroban-00C8EE?style=flat-square)
 ![License MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![HackMeridian 2026, Scale path](https://img.shields.io/badge/HackMeridian_2026-Scale_path-070D1A?style=flat-square)
@@ -21,10 +22,13 @@ tap on the receipt, before a deadline. The station holds no key.**
 
 <!-- DECK_LINK -->
 
-> **Testnet only.** Everything here runs on the Stellar test network with
-> test XLM: no real money moves. The escrow contract is not audited, so its
-> custody mode stays on testnet. On the public network a station takes direct
-> payments only (a SEP-7 QR that pays the venue straight).
+> **On Stellar mainnet (direct), custody on testnet until audited.** Since
+> HackMeridian (25 October 2026), station `8DY7RJ` takes real XLM on the
+> public network: a SEP-7 QR pays the venue's account straight, and the
+> station, which holds no key, credits it from the ledger
+> ([Live on mainnet](#live-on-mainnet)). The escrow contract is not
+> audited, so custody mode (the escrow and its hash-chain refund) stays on
+> testnet, with test XLM: the demo station `YX3DGE` and the video.
 
 In Portugal a *ficha* is a plug; in Brazil it is a token, the coin for a
 public phone. Ficha is both: a token of charging time at a plug in a public
@@ -34,9 +38,13 @@ place, a café, a coworking space, an event.
 |---|---|
 | Demo video (3 min) | <https://youtu.be/cj7e7CjBzUM> |
 | Live app (PWA) | <https://ficha-stellar.vercel.app> |
-| Demo station | `YX3DGE`, "HackMeridian demo (testnet)", in the [signed registry](registry/stations.json) |
+| Mainnet station | `8DY7RJ`, "HackMeridian mainnet (direct)": 0.5 XLM per 1-minute ficha, up to 10, in the [signed public registry](registry/stations.public.json) |
+| Public registry key | `GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG`, pinned in `config.py`, `app/src/config.ts` and the [spec](docs/station-app-contract.md#2-station-registry) |
+| Mainnet venue (host) account | [`GDVPPO2J…JK6ZCN`](https://stellar.expert/explorer/public/account/GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN) on stellar.expert |
+| The first mainnet payment | [`958e7ab6…`](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a): 1 XLM, 2 fichas, 25 October 2026; the run: [docs/mainnet-run.md](docs/mainnet-run.md) |
+| Demo station (testnet, custody) | `YX3DGE`, "HackMeridian demo (testnet)", in the [signed registry](registry/stations.json) |
 | Escrow contract | [`CBRNN2W7…HYI6KYC`](https://stellar.expert/explorer/testnet/contract/CBRNN2W726PIWP7DLLCAOW663I2TBSMR6N7J7S4CGGUIWIXK4HYI6KYC) on testnet |
-| A recorded run, every transaction linked | [docs/testnet-e2e.md](docs/testnet-e2e.md) |
+| A recorded testnet run, every transaction linked | [docs/testnet-e2e.md](docs/testnet-e2e.md) |
 | Architecture and trust model | [docs/architecture.md](docs/architecture.md) |
 | The binding spec between station and app | [docs/station-app-contract.md](docs/station-app-contract.md) |
 | For judges | [docs/hackathon/judges-quickstart.md](docs/hackathon/judges-quickstart.md) |
@@ -44,6 +52,68 @@ place, a café, a coworking space, an event.
 <p align="center">
   <img src="docs/media/station-charging.png" alt="The station's screen while a phone charges: 3 418 mA, 1:48 left of 2 fichas, demo station YX3DGE on testnet" width="760">
 </p>
+
+## Live on mainnet
+
+Built at HackMeridian (25–26 October 2026): Ficha on the Stellar public
+network, in **direct mode**.
+
+- **What runs.** Station `8DY7RJ`, on the bench hardware (the relay, the
+  charger, the phone's meter), with `STELLAR_NETWORK=public`. Its pay QR is
+  a SEP-7 `web+stellar:pay` request: 0.5 XLM per 1-minute ficha, up to 10,
+  to the venue's account, with the session's memo. Any Stellar wallet pays
+  it, and so does the Ficha app once switched to Mainnet. The station reads
+  Horizon with no key, credits the payment, and counts time only while its
+  probe proves the phone charges from it.
+- **The first session**, 25 October 2026, 17:55 UTC: 1 XLM for 2 fichas
+  from the Ficha app's wallet,
+  [transaction `958e7ab6…`](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a)
+  (memo `8DY7RJ.FAFXJXBZ`, fee 100 stroops); probe passed, 120 s charged
+  of 120 paid, verdict `delivered`, peak 2 762 mA, 0.354 Wh, the cut
+  confirmed. The record: [docs/mainnet-run.md](docs/mainnet-run.md).
+- **Refunds, signed by the venue.** The station has no key, so the venue
+  refunds unused time from its own wallet. The station shows each refund
+  due on the operator's R key, as a SEP-7 QR and a **Refund with
+  Freighter** button that opens the site's `/refund` page, which checks the
+  signed registry and the venue's payments on the ledger before Freighter
+  signs; the station marks it refunded when it sees the venue's payment
+  with the memo `refund <REF>`. Built and tested in simulation; the first
+  live refund on mainnet is still to come, and will be added to the record.
+- **Custody stays on testnet** until FichaEscrow is audited: the station,
+  the registry tool and the app refuse it on the public network.
+
+**Check it without spending anything:**
+
+1. **The signed public registry.** With the station's requirements
+   installed ([Run it locally](#run-it-locally)), from the repository root:
+
+   ```bash
+   python tools/registry.py verify --file registry/stations.public.json --key GC2GUQLX6M6LI7ZYWOVROJAFV6EEZFOVSHCODC7TVAUOIBKEE47E3ZFG
+   # OK: stations.public.json (public, 1 station(s)) signed by GC2GUQLX…
+   ```
+
+   The site serves the same bytes at
+   <https://ficha-stellar.vercel.app/registry/stations.public.json>, and
+   the app checks them with the same pinned key.
+2. **The payment on the ledger.** The
+   [transaction](https://stellar.expert/explorer/public/tx/958e7ab6bb01962525bb1171aeb90bc5f74677dda62906fb2c17ea2e9ca49e3a)
+   pays the registry's host key for `8DY7RJ`,
+   [`GDVPPO2J…JK6ZCN`](https://stellar.expert/explorer/public/account/GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN),
+   with the session's memo.
+3. **The guards**, in the code and in `python smoke_test.py` (a fake clock
+   and a fake Horizon). On the public network the station refuses
+   simulated hardware or payments, an unchecked registry, the testnet
+   demo's keys, and a Horizon that is not https or serves another network;
+   it hides the pay QR while Horizon is failing, re-reads its registry
+   entry every minute, and shows a MAINNET, real XLM banner. The app reads
+   a SEP-7 QR without a network passphrase as a mainnet request; on
+   Mainnet it pays no host the signed registry does not list and no QR
+   without a station code; it asks before switching to Mainnet, and its pay
+   screen blocks any check result it does not know. Against address
+   poisoning, a tiny payment naming none of the station's sessions is
+   logged as `dust`, never as a refund due, and a refund's destination
+   comes only from the log
+   ([operators guide, section 4](docs/operators.md#4-switching-testnet--public)).
 
 ## Public safety mode
 
@@ -80,6 +150,8 @@ remotely):
 
 - Open <https://ficha-stellar.vercel.app/stations>: the stations of the
   signed registry on a map, with their payment mode and their contract.
+- Check the mainnet station and its first real payment, with no wallet:
+  [Live on mainnet](#live-on-mainnet).
 - Open a real receipt from a recorded run:
   [`/r?v=2&m=YX3DGE.FZB7EM5D…`](https://ficha-stellar.vercel.app/r?v=2&m=YX3DGE.FZB7EM5D&n=t&h=GCJC2PFILBFQCYFBIDEQG3RZFNOA2ID7ULAEZJUZ5ULZX6BM3ME3XTN6&a=3&k=XLM&f=3&p=180&u=40&wh=0.160&x=3725&vd=d&c=1&t=1792753956&q=10&z=tDumkSbyaXiLO5bx8qnCs0K0a_oRvKTbJDsbuHwvMGk)
   (run M of [docs/testnet-e2e.md](docs/testnet-e2e.md), 23 October 2026).
