@@ -438,7 +438,7 @@ the relay switches **5 V only**.
 | USB wall charger (in Lisbon: an EU plug, rated 100–240 V) | the power source |
 | USB cable with its red VBUS wire cut and taken through the relay's COM and NO | the switched 5 V line to the phone |
 | Android phone with USB debugging (a moto g54 on the bench) | the meter: the station reads its battery current over ADB |
-| Travel router (for the event; OpenWrt) | a network where the laptop and the phone can reach each other, for WiFi ADB; in [public safety mode](#public-safety-mode) it also runs openNDS, the captive portal that sends phones to the station's page ([openwrt/](openwrt/)) |
+| Travel router (OpenWrt; optional) | a network where the laptop and the phone can reach each other, for WiFi ADB; in [public safety mode](#public-safety-mode) it also runs openNDS, the captive portal that sends phones to the station's page ([openwrt/](openwrt/)) |
 
 ```
  USB wall charger ── VBUS (red) ─[COM  relay  NO]─┬── phone
@@ -762,7 +762,7 @@ charges, 7 custody mode.
 | [docs/operators.md](docs/operators.md) | running a station: settings, wiring, probes, the log, the registry |
 | [docs/public-safety.md](docs/public-safety.md) | public safety mode: why, how, privacy, limits, funding, the legal questions |
 | [docs/free-minutes.md](docs/free-minutes.md) | public safety mode on the station: the Wi-Fi's page, identity, settings |
-| [openwrt/README.md](openwrt/README.md) | public safety mode on the router: setup at the event, the walled garden, rollback |
+| [openwrt/README.md](openwrt/README.md) | public safety mode on the router: setup, the walled garden, rollback |
 | [docs/testnet-e2e.md](docs/testnet-e2e.md) | recorded testnet runs, every transaction linked |
 | [docs/mainnet-run.md](docs/mainnet-run.md) | the first mainnet run: settings, steps, the transaction, the station's log, what is pending |
 | [contracts/escrow/README.md](contracts/escrow/README.md) | the contract's build, deployment, CLI calls and upkeep |
