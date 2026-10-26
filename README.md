@@ -325,8 +325,8 @@ for the venue, which `pay_host` then paid to it.
 |---|---|---|
 | The QR | SEP-7 `web+stellar:pay`, any Stellar wallet | a link `…/p?v=1&n&h&s&x&a` the Ficha app opens |
 | Where the money goes | straight to the venue's account | FichaEscrow, then only to the venue or back to the payer |
-| Unused time | logged; the venue refunds it by hand | refunded by the payer's claim with the station's proof |
-| The station | watches Horizon for its memo | watches the contract's events |
+| Unused time | logged and shown on the station; the venue signs the refund from its own wallet | refunded by the payer's claim with the station's proof |
+| The station | watches Horizon for its memo, and for the venue's refunds | watches the contract's events |
 
 The architecture, every component and the trust model:
 [docs/architecture.md](docs/architecture.md).
@@ -343,13 +343,13 @@ station needs no key because everything it must know is public on the ledger.
 | Stellar Asset Contract (SAC) | the escrow moves XLM through its SAC (the contract takes any classic asset's SAC; custody stations use native XLM only, which has no issuer that could freeze a refund); the payer's signature covers the SAC transfer, a sub-invocation the app checks before signing | `contracts/escrow/src/lib.rs`, `app/src/custody/escrow.ts` |
 | Soroban RPC | the station reads events, terms and ledger time with no key and no account; the app simulates every call before it signs | `escrow.py`, `app/src/custody/` |
 | Ledger time | deadlines on both sides (the station, the app's pay and host screens) and the app's transaction time bounds follow the ledger's close time, never a device's clock | `session.py`, `app/src/custody/escrow.ts`, `app/src/custody/host.ts` |
-| SEP-7 | direct mode's `web+stellar:pay` QR that any wallet pays; the mainnet default | `qr.py`, `app/src/pay/` |
-| Memos and Horizon | direct mode matches a payment to `STATION.SESSION` by its memo | `stellar.py` |
+| SEP-7 | direct mode's `web+stellar:pay` QR that any wallet pays, live on mainnet; the venue's refund, a SEP-7 request its own wallet signs | `qr.py`, `stellar.py`, `app/src/pay/`, `app/src/refund/` |
+| Memos and Horizon | direct mode matches a payment to `STATION.SESSION` by its memo, and a venue's refund by `refund <REF>` | `stellar.py`, `session.py` |
 | SEP-10 + SEP-24 | buying balance through an anchor; on testnet the SDF test anchor `testanchor.stellar.org` | `app/src/buy/` |
 | SEP-5 | a non-custodial wallet: 24 words, the key derived and kept on the phone, encrypted under a PIN | `app/src/wallet/` |
-| Ed25519 Stellar keys | the station registry is signed offline and verified against a pinned public key by stations and apps | `tools/registry.py`, `app/src/registry/` |
+| Ed25519 Stellar keys | the station registries, testnet and public, are signed offline and verified against a pinned public key per network by stations and apps | `tools/registry.py`, `app/src/registry/` |
 | Friendbot | a testnet wallet is activated where it pays | `app/src/components/ActivateTestnet.tsx` |
-| Low fees | on testnet, a deposit costs about 0.036 XLM in fees (mostly rent for the session's entry), a claim about 0.0024 XLM (0.0116 XLM for a venue's first claim in an asset, which creates what the contract owes it) | measured, [contracts/escrow/README.md](contracts/escrow/README.md) |
+| Low fees | on mainnet, the first direct payment's fee was 100 stroops (0.00001 XLM), on 25 October 2026. On testnet, measured on 2 October 2026: a deposit about 0.036 XLM in fees (mostly rent for the session's entry), a claim about 0.0024 XLM (0.0116 XLM for a venue's first claim in an asset, which creates what the contract owes it). Testnet's resource fees have risen since: a deposit cost 0.066 XLM on 23 October, and simulated at 2.23 XLM on 25 October, when the app's fee cap for a custody call on testnet went up to 30 XLM (0.5 XLM on any other network) | measured, [contracts/escrow/README.md](contracts/escrow/README.md), [docs/testnet-e2e.md](docs/testnet-e2e.md), [docs/mainnet-run.md](docs/mainnet-run.md) |
 
 Also on the path from QR to app: the receipt and pay links (`/r`, `/p`) are
 verified Android App Links, so the camera opens Ficha directly.
@@ -479,10 +479,11 @@ Wiring of both topologies, the probe rules and every setting:
 
 | Real | Simulated, or not yet |
 |---|---|
-| Testnet transactions: register, deposit, top-up, claim, release, host refund, pay_host, on the deployed contract ([recorded runs](docs/testnet-e2e.md)) | Test XLM, not money. The demo host's and the registry's keys are testnet keys |
-| The signed registry, published with the site and checked by stations and apps | The SEP-24 anchor is SDF's test anchor: no money moves |
+| Mainnet, direct mode: a payment of real XLM straight to the venue's account, credited from Horizon by station `8DY7RJ` on the bench hardware, probe passed, 120 s charged of 120 paid ([the run](docs/mainnet-run.md)) | A refund on mainnet: the venue-signed refund flow is built and tested in simulation; the first live refund is still to come |
+| Testnet transactions: register, deposit, top-up, claim, release, host refund, pay_host, on the deployed contract ([recorded runs](docs/testnet-e2e.md)) | On testnet, test XLM, not money. The demo host's and the testnet registry's keys are testnet keys |
+| The signed registries, testnet and public, published with the site and checked by stations and apps | The SEP-24 anchor is SDF's test anchor: no money moves |
 | The Ficha app: wallet, pay link, deposit, receipt and claim, history, host mode (terms, release, refunds, and collecting what the contract holds for the venue) | The Android app is a debug build, not in a store; judges use the PWA |
-| The relay board switching a charger, the ADB meter, the probes (verified on the bench) | At events the relay switches 5 V, not the 230 V of the target design |
+| The relay board switching a charger, the ADB meter, the probes (verified on the bench, and in the mainnet run) | At events the relay switches 5 V, not the 230 V of the target design |
 | The station's custody mode against the contract, with real deposits from the app | The recorded custody runs used `MOCK=true`: simulated relay and phone (`.env.lisbon.example`). Real hardware was verified in direct mode |
 | | The ADB meter needs USB debugging on the measured phone: a demo meter, not one for the public. A meter at the outlet is roadmap |
 | | No audit; custody is testnet only. A smart-account payer is tested in the contract's tests (a secp256r1 account contract), not on testnet; the app's wallet is a `G…` key |
@@ -533,15 +534,17 @@ before any claim of eligibility:
 
 ## Path to production
 
-- **Direct mode runs on the public network today.** With
-  `STELLAR_NETWORK=public` the station shows a SEP-7 QR that any Stellar
-  wallet pays, straight to the venue's account (USDC by default), and
-  refuses custody. The public registry's key is pinned (station and app),
-  so a mainnet station starts only once it is listed in a
-  `stations.public.json` signed with it, and the app warns before paying a
-  station it cannot find in a signed registry
+- **Direct mode runs on mainnet today.** Station `8DY7RJ` took its first
+  real payment on 25 October 2026 ([docs/mainnet-run.md](docs/mainnet-run.md)).
+  With `STELLAR_NETWORK=public` the station shows a SEP-7 QR that any
+  Stellar wallet pays, straight to the venue's account (USDC by default;
+  native XLM at `8DY7RJ`), and refuses custody. The public registry's key
+  is pinned (station and app), so a mainnet station starts only once it is
+  listed in a `stations.public.json` signed with it, and on Mainnet the app
+  pays no station it cannot find there
   ([operators guide, section 4](docs/operators.md#4-switching-testnet--public)).
-  The recorded runs are all on testnet.
+  Next on mainnet: the first live refund, whose flow is built and tested
+  in simulation, and a pilot venue's station on the venue's own account.
 - **For the public's phones, in either mode: the outlet meter.** The ADB
   meter reads only a phone with USB debugging allowed, so a station open to
   anyone needs a meter on its own output (`METER_SOURCE=outlet`, which the
@@ -698,6 +701,10 @@ charges, 7 custody mode.
 
 ## Roadmap
 
+- **Mainnet, next.** Direct mode is live
+  ([Live on mainnet](#live-on-mainnet)); next, its first live refund (the
+  flow is built and tested in simulation), then a pilot venue's station on
+  the venue's own account.
 - **Strict delivery proof (v2).** Today the venue is paid unless the station
   proves time was *not* delivered. v2: the proof is of delivery, and an
   unproven session goes back to the payer, as a per-station option.
@@ -719,9 +726,9 @@ charges, 7 custody mode.
   account whose `__check_auth` checks a secp256r1 signature, the curve
   passkeys use. What is left is the app's side: a passkey wallet to sign
   with, and its WebAuthn envelope.
-- **A ring of session slots before mainnet.** Each station reuses K session
-  entries instead of renting a new one per session, so a deposit stops
-  paying a new entry's rent.
+- **A ring of session slots before custody on mainnet.** Each station
+  reuses K session entries instead of renting a new one per session, so a
+  deposit stops paying a new entry's rent.
 - **Before custody on mainnet:** an audit of FichaEscrow.
 - **Public safety mode, next.** The router's side on the real router (at
   the event); **sponsored fichas** on the ledger, so a venue, a city, an NGO
