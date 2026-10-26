@@ -77,7 +77,7 @@ registry.
 | Its invariants as tests | [`contracts/escrow/src/test.rs`](../../contracts/escrow/src/test.rs), [`test_spec.rs`](../../contracts/escrow/src/test_spec.rs), [`test_footprint.rs`](../../contracts/escrow/src/test_footprint.rs) (a venue that changes its account cannot fail a claim) |
 | A smart-account payer: a contract account whose `__check_auth` checks a secp256r1 (passkey curve) signature pays, tops up and claims | [`contracts/escrow/src/test_account.rs`](../../contracts/escrow/src/test_account.rs) |
 | The station's hash chain, pay link and escrow watcher (no key) | [`escrow.py`](../../escrow.py) |
-| Mainnet guards on the station: no simulated hardware or payments, no unchecked registry, no testnet key, only an https Horizon that serves the public network | [`config.py`](../../config.py) (`validate_public`), [`registry_check.py`](../../registry_check.py), [`stellar.py`](../../stellar.py) |
+| Mainnet guards on the station: no simulated hardware or payments, no unchecked registry, not the testnet demo's keys, only an https Horizon that says it serves the public network | [`config.py`](../../config.py) (`validate`, `validate_public`), [`registry_check.py`](../../registry_check.py), [`stellar.py`](../../stellar.py) |
 | Mainnet checks in the app: no unlisted host, no QR without a station code, a pay screen that blocks any result it does not know | [`app/src/pay/check.ts`](../../app/src/pay/check.ts) |
 | Refunds signed by the venue in direct mode: the station's refund due and the `/refund` page | [`session.py`](../../session.py), [`app/src/routes/refund.tsx`](../../app/src/routes/refund.tsx), [`app/src/refund/`](../../app/src/refund/) |
 | Paid time counted only while probes prove charging | [`session.py`](../../session.py) |
