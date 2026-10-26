@@ -58,8 +58,9 @@ place, a café, a coworking space, an event.
 Built at HackMeridian (25–26 October 2026): Ficha on the Stellar public
 network, in **direct mode**.
 
-- **What runs.** Station `8DY7RJ`, on the bench hardware (the relay, the
-  charger, the phone's meter), with `STELLAR_NETWORK=public`. Its pay QR is
+- **What runs.** Station `8DY7RJ`, listed in the signed public registry
+  for 25–26 October 2026, on the bench hardware (the relay, the charger,
+  the phone's meter), with `STELLAR_NETWORK=public`. Its pay QR is
   a SEP-7 `web+stellar:pay` request: 0.5 XLM per 1-minute ficha, up to 10,
   to the venue's account, with the session's memo. Any Stellar wallet pays
   it, and so does the Ficha app once switched to Mainnet. The station reads
