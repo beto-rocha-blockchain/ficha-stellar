@@ -102,8 +102,9 @@ in **direct mode**, which predates the event; what the event added is in
    pays the registry's host key for `8DY7RJ`,
    [`GDVPPO2J…JK6ZCN`](https://stellar.expert/explorer/public/account/GDVPPO2JSSCMTPAL2CY7WZQSUEONXU45MR4GCUY3CNAFQUTRZ5JK6ZCN),
    with the session's memo.
-3. **The guards**, in the code and in `python smoke_test.py` (a fake clock
-   and a fake Horizon). On the public network the station refuses
+3. **The guards**, in the code and in the tests (`python smoke_test.py`
+   for the station, on a fake clock and a fake Horizon; `npm test` in
+   `app/` for the app). On the public network the station refuses
    simulated hardware or payments, an unchecked registry, the testnet
    demo's keys, and a Horizon that is not https or serves another network;
    it hides the pay QR while Horizon is failing, re-reads its registry
